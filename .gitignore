@@ -1,0 +1,27 @@
+# Build output
+/TimeTrack.exe
+
+# Local compiler refs and build helpers
+/build/refs/
+/build/icons/
+/build/*.png
+/build/*.ps1
+/build/*.rsp
+/build/seed*.py
+
+# Test data
+/demo/
+/testdata/
+/rename_test/
+/split_test/
+/prodtest/
+/smoke*/
+/bgtest*/
+/icontest/
+
+# IDE / OS
+.vs/
+*.user
+*.suo
+Thumbs.db
+desktop.ini
