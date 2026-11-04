@@ -25,3 +25,5 @@
 *.suo
 Thumbs.db
 desktop.ini
+# Local release artifacts
+/build/release/
