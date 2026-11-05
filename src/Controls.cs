@@ -428,4 +428,153 @@ namespace TimeTrack
                 VisualTreeHelper.GetDpi(this).PixelsPerDip);
         }
     }
+
+    public class PageScrollBar : FrameworkElement
+    {
+        private readonly ScrollViewer _viewer;
+        private readonly EventHandler _themeHandler;
+        private bool _dragging;
+        private bool _thumbHover;
+        private double _dragStartY;
+        private double _dragStartOffset;
+
+        public PageScrollBar(ScrollViewer viewer)
+        {
+            _viewer = viewer;
+            Width = 12;
+            Focusable = false;
+            Cursor = Cursors.Arrow;
+            _themeHandler = delegate { InvalidateVisual(); };
+            Ui.ThemeChanged += _themeHandler;
+            Unloaded += delegate { Ui.ThemeChanged -= _themeHandler; };
+            SizeChanged += delegate { Refresh(); };
+        }
+
+        public void Refresh()
+        {
+            bool canScroll = _viewer != null && _viewer.ScrollableHeight > 0.5;
+            Visibility = canScroll ? Visibility.Visible : Visibility.Collapsed;
+            IsHitTestVisible = canScroll;
+            if (!canScroll && _dragging)
+            {
+                _dragging = false;
+                ReleaseMouseCapture();
+            }
+            InvalidateVisual();
+        }
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            base.OnRender(dc);
+            Rect thumb = GetThumbRect();
+            if (thumb.IsEmpty) return;
+
+            double trackHeight = Math.Max(0, ActualHeight - 8);
+            dc.PushOpacity(0.42);
+            dc.DrawRoundedRectangle(Ui.StrokeSoft, null, new Rect(4, 4, 4, trackHeight), 2, 2);
+            dc.Pop();
+            Brush thumbBrush = _dragging ? Ui.Accent : (_thumbHover ? Ui.TextSoft : Ui.Muted);
+            dc.DrawRoundedRectangle(thumbBrush, null, thumb, 3, 3);
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            if (_viewer == null) return;
+            Point point = e.GetPosition(this);
+            if (_dragging)
+            {
+                Rect thumb = GetThumbRect();
+                double trackHeight = Math.Max(0, ActualHeight - 8);
+                double maxTop = Math.Max(0, trackHeight - thumb.Height);
+                if (maxTop > 0 && !thumb.IsEmpty)
+                {
+                    double offset = _dragStartOffset +
+                        ((point.Y - _dragStartY) / maxTop) * _viewer.ScrollableHeight;
+                    _viewer.ScrollToVerticalOffset(Math.Max(0, Math.Min(_viewer.ScrollableHeight, offset)));
+                }
+                e.Handled = true;
+                return;
+            }
+
+            bool over = GetThumbRect().Contains(point);
+            if (over != _thumbHover)
+            {
+                _thumbHover = over;
+                Cursor = over ? Cursors.SizeNS : Cursors.Arrow;
+                InvalidateVisual();
+            }
+        }
+
+        protected override void OnMouseLeftButtonDown(MouseButtonEventArgs e)
+        {
+            base.OnMouseLeftButtonDown(e);
+            if (_viewer == null || _viewer.ScrollableHeight <= 0.5) return;
+            Point point = e.GetPosition(this);
+            Rect thumb = GetThumbRect();
+            if (thumb.Contains(point))
+            {
+                _dragging = true;
+                _dragStartY = point.Y;
+                _dragStartOffset = _viewer.VerticalOffset;
+                CaptureMouse();
+                Cursor = Cursors.SizeNS;
+                InvalidateVisual();
+                e.Handled = true;
+            }
+            else if (point.Y >= 4 && point.Y <= ActualHeight - 4)
+            {
+                double page = Math.Max(48, _viewer.ViewportHeight * 0.9);
+                double offset = _viewer.VerticalOffset + (point.Y < thumb.Top ? -page : page);
+                _viewer.ScrollToVerticalOffset(Math.Max(0, Math.Min(_viewer.ScrollableHeight, offset)));
+                e.Handled = true;
+            }
+        }
+
+        protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
+        {
+            base.OnMouseLeftButtonUp(e);
+            if (!_dragging) return;
+            _dragging = false;
+            ReleaseMouseCapture();
+            Cursor = _thumbHover ? Cursors.SizeNS : Cursors.Arrow;
+            InvalidateVisual();
+            e.Handled = true;
+        }
+
+        protected override void OnMouseLeave(MouseEventArgs e)
+        {
+            base.OnMouseLeave(e);
+            if (_dragging) return;
+            if (_thumbHover)
+            {
+                _thumbHover = false;
+                Cursor = Cursors.Arrow;
+                InvalidateVisual();
+            }
+        }
+
+        protected override void OnMouseWheel(MouseWheelEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            if (_viewer == null || _viewer.ScrollableHeight <= 0.5) return;
+            double offset = _viewer.VerticalOffset - (e.Delta > 0 ? 90 : -90);
+            _viewer.ScrollToVerticalOffset(Math.Max(0, Math.Min(_viewer.ScrollableHeight, offset)));
+            e.Handled = true;
+        }
+
+        private Rect GetThumbRect()
+        {
+            if (_viewer == null || ActualHeight <= 0 || _viewer.ViewportHeight <= 0) return Rect.Empty;
+            double extent = _viewer.ExtentHeight;
+            double viewport = _viewer.ViewportHeight;
+            if (extent <= viewport + 0.5) return Rect.Empty;
+            double trackHeight = Math.Max(0, ActualHeight - 8);
+            double thumbHeight = Math.Max(36, trackHeight * viewport / extent);
+            if (thumbHeight > trackHeight) thumbHeight = trackHeight;
+            double maxTop = Math.Max(0, trackHeight - thumbHeight);
+            double ratio = _viewer.ScrollableHeight <= 0 ? 0 : _viewer.VerticalOffset / _viewer.ScrollableHeight;
+            return new Rect(3, 4 + maxTop * ratio, 6, thumbHeight);
+        }
+    }
 }

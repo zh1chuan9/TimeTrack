@@ -13,9 +13,52 @@ namespace TimeTrack
         private const int DwmUseImmersiveDarkMode = 20;
         private const int DwmWindowCornerPreference = 33;
         private const int DwmBorderColor = 34;
+        private const int WmGetMinMaxInfo = 0x0024;
+        private const uint MonitorDefaultToNearest = 2;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Point
+        {
+            public int X;
+            public int Y;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Rect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MonitorInfo
+        {
+            public int Size;
+            public Rect Monitor;
+            public Rect Work;
+            public uint Flags;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MinMaxInfo
+        {
+            public Point Reserved;
+            public Point MaxSize;
+            public Point MaxPosition;
+            public Point MinTrackSize;
+            public Point MaxTrackSize;
+        }
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 
         public static void Apply(Window window)
         {
@@ -26,12 +69,44 @@ namespace TimeTrack
                     IntPtr handle = new WindowInteropHelper(window).Handle;
                     int round = 2;
                     DwmSetWindowAttribute(handle, DwmWindowCornerPreference, ref round, sizeof(int));
+                    HwndSource source = HwndSource.FromHwnd(handle);
+                    if (source != null) source.AddHook(WindowProc);
                 }
                 catch
                 {
                 }
                 SetDark(window, Ui.IsDark);
             };
+        }
+
+        private static IntPtr WindowProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WmGetMinMaxInfo)
+            {
+                try
+                {
+                    MinMaxInfo info = (MinMaxInfo)Marshal.PtrToStructure(lParam, typeof(MinMaxInfo));
+                    IntPtr monitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+                    if (monitor != IntPtr.Zero)
+                    {
+                        MonitorInfo monitorInfo = new MonitorInfo();
+                        monitorInfo.Size = Marshal.SizeOf(typeof(MonitorInfo));
+                        if (GetMonitorInfo(monitor, ref monitorInfo))
+                        {
+                            info.MaxPosition.X = monitorInfo.Work.Left - monitorInfo.Monitor.Left;
+                            info.MaxPosition.Y = monitorInfo.Work.Top - monitorInfo.Monitor.Top;
+                            info.MaxSize.X = monitorInfo.Work.Right - monitorInfo.Work.Left;
+                            info.MaxSize.Y = monitorInfo.Work.Bottom - monitorInfo.Work.Top;
+                            Marshal.StructureToPtr(info, lParam, true);
+                        }
+                    }
+                }
+                catch
+                {
+                }
+                handled = true;
+            }
+            return IntPtr.Zero;
         }
 
         public static void SetDark(Window window, bool dark)

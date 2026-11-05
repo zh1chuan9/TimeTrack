@@ -28,10 +28,13 @@ namespace TimeTrack
         private DispatcherTimer _tickTimer;
         private DispatcherTimer _refreshTimer;
         private ScrollViewer _scroller;
+        private PageScrollBar _pageScroll;
         private Border _content;
         private Border _statusPill;
         private Border _statusDot;
         private TextBlock _statusLabel;
+        private Border _maxButton;
+        private TextBlock _maxGlyph;
         private System.Windows.Shapes.Ellipse _glow;
 
         private string _view = "dashboard";
@@ -93,6 +96,8 @@ namespace TimeTrack
             Content = BuildShell();
             SetupTray();
             UpdateStatus();
+            StateChanged += delegate { UpdateMaximizeGlyph(); };
+            UpdateMaximizeGlyph();
 
             Loaded += delegate
             {
@@ -169,8 +174,22 @@ namespace TimeTrack
             _scroller.CanContentScroll = false;
             _scroller.Focusable = false;
             _scroller.PanningMode = PanningMode.VerticalOnly;
+            _scroller.ScrollChanged += delegate
+            {
+                if (_pageScroll != null) _pageScroll.Refresh();
+            };
             Grid.SetRow(_scroller, 1);
             root.Children.Add(_scroller);
+
+            _pageScroll = new PageScrollBar(_scroller);
+            _pageScroll.HorizontalAlignment = HorizontalAlignment.Right;
+            _pageScroll.VerticalAlignment = VerticalAlignment.Stretch;
+            _pageScroll.Margin = new Thickness(0, 0, 5, 0);
+            _pageScroll.Width = 12;
+            _pageScroll.IsHitTestVisible = false;
+            Panel.SetZIndex(_pageScroll, 20);
+            Grid.SetRow(_pageScroll, 1);
+            root.Children.Add(_pageScroll);
 
             _content = new Border();
             _content.Width = 880;
@@ -254,6 +273,11 @@ namespace TimeTrack
             minimize.Margin = new Thickness(2, 0, 2, 0);
             right.Children.Add(minimize);
 
+            _maxButton = ChromeButton("\uE922", "最大化", Ui.CardHover, Ui.ChromeGlyphHover, ToggleMaximize);
+            _maxButton.Margin = new Thickness(2, 0, 2, 0);
+            _maxGlyph = _maxButton.Child as TextBlock;
+            right.Children.Add(_maxButton);
+
             Border close = ChromeButton("\uE8BB", "关闭到托盘", Ui.CloseHover, Brushes.White,
                 delegate { Close(); });
             close.Margin = new Thickness(2, 0, 0, 0);
@@ -296,6 +320,22 @@ namespace TimeTrack
             return button;
         }
 
+        private void ToggleMaximize()
+        {
+            if (WindowState == WindowState.Maximized)
+                WindowState = WindowState.Normal;
+            else
+                WindowState = WindowState.Maximized;
+        }
+
+        private void UpdateMaximizeGlyph()
+        {
+            if (_maxGlyph == null || _maxButton == null) return;
+            bool maximized = WindowState == WindowState.Maximized;
+            _maxGlyph.Text = maximized ? "\uE923" : "\uE922";
+            _maxButton.ToolTip = maximized ? "还原" : "最大化";
+        }
+
         private void UpdateContentWidth()
         {
             if (_scroller == null || _content == null) return;
@@ -304,6 +344,7 @@ namespace TimeTrack
             if (viewport <= 0) return;
             double width = Math.Min(920, Math.Max(600, viewport - 56));
             if (Math.Abs(_content.Width - width) > 0.5) _content.Width = width;
+            if (_pageScroll != null) _pageScroll.Refresh();
         }
 
         private UIElement BuildCurrentView()
@@ -332,6 +373,7 @@ namespace TimeTrack
             _content.Child = BuildCurrentView();
             _content.UpdateLayout();
             _scroller.ScrollToVerticalOffset(offset);
+            if (_pageScroll != null) _pageScroll.Refresh();
             _lastVersion = _store.Version;
 
             _renderedView = _view;
@@ -1559,7 +1601,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.3.0", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.4.0", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
