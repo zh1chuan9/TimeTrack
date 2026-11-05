@@ -60,6 +60,19 @@ namespace TimeTrack
         [DllImport("user32.dll")]
         private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 
+        [DllImport("user32.dll")]
+        private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+
+        public static void MakeTopmost(IntPtr hwnd)
+        {
+            try
+            {
+                SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0,
+                    0x0001 | 0x0002 | 0x0010 | 0x0040);
+            }
+            catch { }
+        }
+
         public static void Apply(Window window)
         {
             window.SourceInitialized += delegate

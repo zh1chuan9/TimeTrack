@@ -99,6 +99,7 @@ namespace TimeTrack
         public bool DarkMode { get; set; }
         public Dictionary<string, string> CustomNames { get; set; }
         public Dictionary<string, string> Categories { get; set; }
+        public Dictionary<string, string> CategoryColors { get; set; }
         public int IdleSeconds { get; set; }
         public bool AutoBackup { get; set; }
         public bool AutoCleanup { get; set; }
@@ -112,6 +113,7 @@ namespace TimeTrack
             KnownApps = new List<AppMeta>();
             CustomNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             Categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            CategoryColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             IdleSeconds = 120;
             AutoStart = false;
             Paused = false;
@@ -136,12 +138,42 @@ namespace TimeTrack
         public static string Normalize(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return "其他";
-            string text = value.Trim();
+            return value.Trim();
+        }
+
+        public static bool IsBuiltIn(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
             for (int i = 0; i < Names.Length; i++)
             {
-                if (string.Equals(Names[i], text, StringComparison.Ordinal)) return Names[i];
+                if (string.Equals(Names[i], value, StringComparison.Ordinal)) return true;
             }
-            return "其他";
+            return false;
+        }
+
+        public static string DefaultColor(string category)
+        {
+            if (string.Equals(category, "工作", StringComparison.Ordinal)) return "#3B82F6";
+            if (string.Equals(category, "学习", StringComparison.Ordinal)) return "#22C55E";
+            if (string.Equals(category, "娱乐", StringComparison.Ordinal)) return "#F59E0B";
+            if (string.Equals(category, "社交", StringComparison.Ordinal)) return "#EC4899";
+            if (string.Equals(category, "工具", StringComparison.Ordinal)) return "#06B6D4";
+            if (string.Equals(category, "其他", StringComparison.Ordinal)) return "#64748B";
+            return "#64748B";
+        }
+
+        public static string NormalizeColor(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            string text = value.Trim();
+            if (text.Length != 7 || text[0] != '#') return null;
+            for (int i = 1; i < text.Length; i++)
+            {
+                char c = text[i];
+                bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex) return null;
+            }
+            return "#" + text.Substring(1).ToUpperInvariant();
         }
 
         public static string Next(string value)

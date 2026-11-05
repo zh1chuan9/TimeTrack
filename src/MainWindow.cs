@@ -6,7 +6,9 @@ using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Shell;
@@ -735,7 +737,7 @@ namespace TimeTrack
             else
             {
                 List<string> categories = new List<string>();
-                foreach (string category in CategoryCatalog.Names)
+                foreach (string category in _store.GetCategories())
                 {
                     long value;
                     long oldValue;
@@ -864,7 +866,7 @@ namespace TimeTrack
         private Dictionary<string, long> SumCategories(RangeData data)
         {
             Dictionary<string, long> totals = new Dictionary<string, long>(StringComparer.Ordinal);
-            foreach (string category in CategoryCatalog.Names) totals[category] = 0;
+            foreach (string category in _store.GetCategories()) totals[category] = 0;
             foreach (AppAgg app in data.Apps)
             {
                 string category = _store.GetCategory(app.Key);
@@ -875,14 +877,9 @@ namespace TimeTrack
             return totals;
         }
 
-        private static Brush CategoryBrush(string category)
+        private Brush CategoryBrush(string category)
         {
-            if (string.Equals(category, "工作", StringComparison.Ordinal)) return Ui.Accent;
-            if (string.Equals(category, "学习", StringComparison.Ordinal)) return Ui.Green;
-            if (string.Equals(category, "娱乐", StringComparison.Ordinal)) return Ui.Amber;
-            if (string.Equals(category, "社交", StringComparison.Ordinal)) return Ui.Red;
-            if (string.Equals(category, "工具", StringComparison.Ordinal)) return Ui.AccentLight;
-            return Ui.Dim;
+            return Ui.BrushFrom(_store.GetCategoryColor(category));
         }
 
         private List<ChartItem> BuildChartItems(RangeData data, out bool hourly, out long average)
@@ -1070,7 +1067,9 @@ namespace TimeTrack
                     row.Padding = new Thickness(10, 7, 10, 7);
                     row.Margin = new Thickness(2, 1, 2, 1);
                     row.Cursor = Cursors.Hand;
-                    row.ToolTip = string.IsNullOrEmpty(app.Path) ? app.Key : app.Path;
+                    string category = _store.GetCategory(app.Key);
+                    row.ToolTip = "分类：" + category + "\n使用时长：" + Ui.Duration(app.Seconds) +
+                        (string.IsNullOrEmpty(app.Path) ? string.Empty : "\n" + app.Path);
 
                     Grid grid = new Grid();
                     grid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -1086,9 +1085,14 @@ namespace TimeTrack
 
                     StackPanel mid = new StackPanel();
                     mid.VerticalAlignment = VerticalAlignment.Center;
+                    StackPanel nameRow = new StackPanel();
+                    nameRow.Orientation = Orientation.Horizontal;
                     TextBlock name = Ui.TextBlock(string.IsNullOrEmpty(app.Name) ? "未知应用" : app.Name, 13, Ui.Text, FontWeights.Medium);
                     name.TextTrimming = TextTrimming.CharacterEllipsis;
-                    mid.Children.Add(name);
+                    name.MaxWidth = 330;
+                    nameRow.Children.Add(name);
+                    nameRow.Children.Add(CategoryTag(category, app.Seconds));
+                    mid.Children.Add(nameRow);
                     UsageBar bar = new UsageBar();
                     bar.Ratio = data.Apps[0].Seconds > 0 ? (double)app.Seconds / data.Apps[0].Seconds : 0;
                     mid.Children.Add(bar);
@@ -1121,14 +1125,290 @@ namespace TimeTrack
             return card;
         }
 
+        private UIElement CategoryTag(string category, long seconds)
+        {
+            StackPanel tag = new StackPanel();
+            tag.Orientation = Orientation.Horizontal;
+            tag.VerticalAlignment = VerticalAlignment.Center;
+            tag.Margin = new Thickness(9, 0, 0, 0);
+            tag.ToolTip = "分类：" + category + "\n使用时长：" + Ui.Duration(seconds);
+            Brush brush = CategoryBrush(category);
+            var dot = Ui.Dot(brush, 5);
+            dot.Margin = new Thickness(0, 0, 5, 0);
+            tag.Children.Add(dot);
+            tag.Children.Add(Ui.TextBlock(category, 9.5, brush, FontWeights.Medium));
+            return tag;
+        }
+
+        private Border CategoryChip(string appKey, string category, long seconds, Action changed)
+        {
+            Border chip = new Border();
+            chip.Background = Ui.Card2;
+            chip.BorderBrush = Ui.Stroke;
+            chip.BorderThickness = new Thickness(1);
+            chip.CornerRadius = new CornerRadius(9);
+            chip.Padding = new Thickness(8, 4, 7, 4);
+            chip.Cursor = Cursors.Hand;
+            chip.ToolTip = "分类：" + category + "\n本应用：" + Ui.Duration(seconds) + "\n点击选择或新建分类";
+
+            StackPanel content = new StackPanel();
+            content.Orientation = Orientation.Horizontal;
+            Brush brush = CategoryBrush(category);
+            var dot = Ui.Dot(brush, 6);
+            dot.Margin = new Thickness(0, 0, 5, 0);
+            content.Children.Add(dot);
+            content.Children.Add(Ui.TextBlock(category, 10.5, brush, FontWeights.Medium));
+            TextBlock chevron = Ui.Glyph("\uE70D", 8, Ui.Dim);
+            chevron.Margin = new Thickness(5, 1, 0, 0);
+            content.Children.Add(chevron);
+            chip.Child = content;
+
+            chip.MouseEnter += delegate { chip.Background = Ui.Field; };
+            chip.MouseLeave += delegate { chip.Background = Ui.Card2; };
+            chip.MouseLeftButtonUp += delegate
+            {
+                Dispatcher.BeginInvoke(DispatcherPriority.Input,
+                    new Action(delegate { ShowCategoryPicker(chip, appKey, changed); }));
+            };
+            return chip;
+        }
+
+        private void ShowCategoryPicker(Border chip, string appKey, Action changed)
+        {
+            Popup popup = new Popup();
+            popup.PlacementTarget = chip;
+            popup.Placement = PlacementMode.Bottom;
+            popup.StaysOpen = true;
+            popup.AllowsTransparency = false;
+            popup.PopupAnimation = PopupAnimation.None;
+            popup.VerticalOffset = 5;
+
+            Border panel = new Border();
+            panel.Width = 236;
+            panel.Background = Ui.Card;
+            panel.BorderBrush = Ui.Stroke;
+            panel.BorderThickness = new Thickness(1);
+            panel.CornerRadius = new CornerRadius(12);
+            panel.Padding = new Thickness(7);
+            StackPanel content = new StackPanel();
+            panel.Child = content;
+            popup.Child = panel;
+            popup.Opened += delegate
+            {
+                PresentationSource source = PresentationSource.FromVisual(panel);
+                HwndSource host = source as HwndSource;
+                if (host != null) WindowFx.MakeTopmost(host.Handle);
+            };
+            ShowCategoryList(content, panel, popup, appKey, changed);
+            popup.IsOpen = true;
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(delegate
+            {
+                if (popup.IsOpen) popup.StaysOpen = false;
+            }));
+        }
+
+        private void ShowCategoryList(StackPanel content, Border panel, Popup popup, string appKey, Action changed)
+        {
+            content.Children.Clear();
+            string current = _store.GetCategory(appKey);
+            TextBlock title = Ui.TextBlock("选择分类", 10.5, Ui.Muted, FontWeights.Medium);
+            title.Margin = new Thickness(8, 3, 8, 5);
+            content.Children.Add(title);
+
+            foreach (string category in _store.GetCategories())
+            {
+                string captured = category;
+                Border item = new Border();
+                item.Background = Brushes.Transparent;
+                item.CornerRadius = new CornerRadius(7);
+                item.Padding = new Thickness(8, 6, 7, 6);
+                item.Cursor = Cursors.Hand;
+                Grid row = new Grid();
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                row.ColumnDefinitions[0].Width = new GridLength(18);
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                row.ColumnDefinitions[2].Width = GridLength.Auto;
+                Brush brush = CategoryBrush(captured);
+                var dot = Ui.Dot(brush, 7);
+                dot.VerticalAlignment = VerticalAlignment.Center;
+                row.Children.Add(dot);
+                TextBlock label = Ui.TextBlock(captured, 11.5, Ui.Text, FontWeights.Medium);
+                label.VerticalAlignment = VerticalAlignment.Center;
+                label.Margin = new Thickness(7, 0, 0, 0);
+                Grid.SetColumn(label, 1);
+                row.Children.Add(label);
+                if (string.Equals(captured, current, StringComparison.Ordinal))
+                {
+                    TextBlock check = Ui.TextBlock("\uE73E", 11, Ui.Accent);
+                    check.VerticalAlignment = VerticalAlignment.Center;
+                    Grid.SetColumn(check, 2);
+                    row.Children.Add(check);
+                }
+                item.Child = row;
+                item.MouseEnter += delegate { item.Background = Ui.Card2; };
+                item.MouseLeave += delegate { item.Background = Brushes.Transparent; };
+                item.MouseLeftButtonUp += delegate
+                {
+                    _store.SetCategory(appKey, captured);
+                    popup.IsOpen = false;
+                    if (changed != null) changed();
+                };
+                content.Children.Add(item);
+            }
+
+            Border separator = Ui.Separator();
+            separator.Margin = new Thickness(8, 5, 8, 5);
+            content.Children.Add(separator);
+
+            Border add = new Border();
+            add.Background = Brushes.Transparent;
+            add.CornerRadius = new CornerRadius(7);
+            add.Padding = new Thickness(8, 6, 8, 6);
+            add.Cursor = Cursors.Hand;
+            StackPanel addContent = new StackPanel();
+            addContent.Orientation = Orientation.Horizontal;
+            TextBlock plus = Ui.Glyph("\uE710", 11, Ui.Accent);
+            plus.Margin = new Thickness(0, 0, 7, 0);
+            addContent.Children.Add(plus);
+            addContent.Children.Add(Ui.TextBlock("新建分类", 11.5, Ui.Accent, FontWeights.Medium));
+            add.Child = addContent;
+            add.MouseEnter += delegate { add.Background = Ui.Card2; };
+            add.MouseLeave += delegate { add.Background = Brushes.Transparent; };
+            add.MouseLeftButtonUp += delegate { ShowCategoryEditor(content, panel, popup, appKey, changed); };
+            content.Children.Add(add);
+        }
+
+        private void ShowCategoryEditor(StackPanel content, Border panel, Popup popup, string appKey, Action changed)
+        {
+            content.Children.Clear();
+            TextBlock title = Ui.TextBlock("新建分类", 11.5, Ui.Text, FontWeights.SemiBold);
+            title.Margin = new Thickness(8, 3, 8, 8);
+            content.Children.Add(title);
+
+            TextBox nameBox = new TextBox();
+            nameBox.Text = "";
+            nameBox.FontSize = 11.5;
+            nameBox.FontFamily = Ui.Font;
+            nameBox.Foreground = Ui.Text;
+            nameBox.Background = Ui.Field;
+            nameBox.BorderBrush = Ui.Stroke;
+            nameBox.BorderThickness = new Thickness(1);
+            nameBox.Padding = new Thickness(8, 6, 8, 6);
+            nameBox.Margin = new Thickness(6, 0, 6, 8);
+            nameBox.ToolTip = "最多 12 个字";
+            content.Children.Add(nameBox);
+
+            string selectedColor = "#3B82F6";
+            string[] colors = new string[] { "#3B82F6", "#22C55E", "#F59E0B", "#EC4899", "#06B6D4", "#8B5CF6", "#EF4444", "#14B8A6", "#F97316", "#64748B" };
+            WrapPanel swatches = new WrapPanel();
+            swatches.Margin = new Thickness(6, 0, 6, 8);
+            List<Border> swatchBorders = new List<Border>();
+            for (int i = 0; i < colors.Length; i++)
+            {
+                string color = colors[i];
+                Border swatch = new Border();
+                swatch.Width = 20;
+                swatch.Height = 20;
+                swatch.CornerRadius = new CornerRadius(10);
+                swatch.Background = Ui.BrushFrom(color);
+                swatch.BorderThickness = new Thickness(2);
+                swatch.BorderBrush = i == 0 ? Ui.Text : Brushes.Transparent;
+                swatch.Margin = new Thickness(0, 0, 7, 7);
+                swatch.Cursor = Cursors.Hand;
+                swatch.ToolTip = color;
+                swatchBorders.Add(swatch);
+                swatch.MouseLeftButtonUp += delegate
+                {
+                    selectedColor = color;
+                    for (int j = 0; j < swatchBorders.Count; j++)
+                        swatchBorders[j].BorderBrush = Brushes.Transparent;
+                    swatch.BorderBrush = Ui.Text;
+                };
+                swatches.Children.Add(swatch);
+            }
+            content.Children.Add(swatches);
+
+            TextBlock error = Ui.TextBlock("", 9.5, Ui.Red);
+            error.Margin = new Thickness(8, 0, 8, 7);
+            error.TextWrapping = TextWrapping.Wrap;
+            content.Children.Add(error);
+
+            Grid actions = new Grid();
+            actions.Margin = new Thickness(6, 0, 6, 2);
+            actions.ColumnDefinitions.Add(new ColumnDefinition());
+            actions.ColumnDefinitions.Add(new ColumnDefinition());
+            actions.ColumnDefinitions[1].Width = GridLength.Auto;
+            TextButton cancel = new TextButton("取消", Ui.Muted);
+            cancel.HorizontalAlignment = HorizontalAlignment.Left;
+            cancel.Click += delegate { ShowCategoryList(content, panel, popup, appKey, changed); };
+            actions.Children.Add(cancel);
+            Border add = PillButton("添加", "", Ui.Accent, false, delegate
+            {
+                string name = nameBox.Text.Trim();
+                if (name.Length == 0)
+                {
+                    error.Text = "请输入分类名称";
+                    return;
+                }
+                if (name.Length > 12)
+                {
+                    error.Text = "分类名称最多 12 个字";
+                    return;
+                }
+                if (!_store.AddCategory(name, selectedColor))
+                {
+                    error.Text = "无法创建这个分类";
+                    return;
+                }
+                _store.SetCategory(appKey, name);
+                popup.IsOpen = false;
+                if (changed != null) changed();
+            });
+            Grid.SetColumn(add, 1);
+            actions.Children.Add(add);
+            content.Children.Add(actions);
+
+            nameBox.Dispatcher.BeginInvoke(DispatcherPriority.Input, new Action(delegate { nameBox.Focus(); }));
+        }
+
+        private void OpenAppFolder(AppMeta app)
+        {
+            if (app == null || string.IsNullOrEmpty(app.Path))
+            {
+                MessageBox.Show(this, "这个应用没有可用的文件路径。", "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (!File.Exists(app.Path) && !Directory.Exists(app.Path))
+            {
+                MessageBox.Show(this, "找不到应用所在的文件夹。", "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            try
+            {
+                if (Directory.Exists(app.Path))
+                    Process.Start("explorer.exe", "\"" + app.Path + "\"");
+                else
+                    Process.Start("explorer.exe", "/select,\"" + app.Path + "\"");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("OpenAppFolder", ex);
+            }
+        }
+
         private UIElement BuildFooter()
         {
-            string text = _store.TrackBackground
-                ? "前台与后台应用均计时  ·  多应用并行累计  ·  全部数据保存在本机"
-                : "仅统计前台活跃窗口  ·  空闲时自动暂停  ·  全部数据保存在本机";
-            TextBlock footer = Ui.TextBlock(text, 10.5, Ui.Dim);
+            TextBlock footer = Ui.TextBlock("Time Track v1.5.0  GitHub-Zh1Chuan9", 10.5, Ui.Dim);
             footer.HorizontalAlignment = HorizontalAlignment.Center;
             footer.Margin = new Thickness(0, 18, 0, 0);
+            footer.Cursor = Cursors.Hand;
+            footer.ToolTip = "https://github.com/zh1chuan9/TimeTrack";
+            footer.MouseLeftButtonUp += delegate
+            {
+                try { Process.Start("https://github.com/zh1chuan9/TimeTrack"); }
+                catch (Exception ex) { Logger.Error("Open GitHub", ex); }
+            };
             return footer;
         }
 
@@ -1537,7 +1817,7 @@ namespace TimeTrack
             header.ColumnDefinitions[1].Width = GridLength.Auto;
             StackPanel titleStack = new StackPanel();
             titleStack.Children.Add(Ui.TextBlock("应用列表", 13, Ui.TextSoft, FontWeights.SemiBold));
-            TextBlock hint = Ui.TextBlock("关闭开关不再统计；点击分类标签切换分类，点击「改名」自定义显示名称", 10.5, Ui.Dim);
+            TextBlock hint = Ui.TextBlock("关闭开关不再统计；点击分类标签选择分类，点击「改名」自定义显示名称", 10.5, Ui.Dim);
             hint.Margin = new Thickness(0, 3, 0, 0);
             titleStack.Children.Add(hint);
             header.Children.Add(titleStack);
@@ -1578,9 +1858,11 @@ namespace TimeTrack
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
+                grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions[2].Width = GridLength.Auto;
                 grid.ColumnDefinitions[3].Width = GridLength.Auto;
                 grid.ColumnDefinitions[4].Width = GridLength.Auto;
+                grid.ColumnDefinitions[5].Width = GridLength.Auto;
 
                 Border icon = Ui.AppIcon(app.Key, DisplayName(app), app.Path, 30);
                 icon.VerticalAlignment = VerticalAlignment.Center;
@@ -1600,16 +1882,19 @@ namespace TimeTrack
                 grid.Children.Add(middle);
 
                 string category = _store.GetCategory(app.Key);
-                Border categoryChip = PillButton(category, "", Ui.Muted, false, delegate
-                {
-                    _store.SetCategory(app.Key, CategoryCatalog.Next(category));
-                    Rebuild(true);
-                });
+                Border categoryChip = CategoryChip(app.Key, category, total, delegate { Rebuild(true); });
                 categoryChip.VerticalAlignment = VerticalAlignment.Center;
-                categoryChip.Margin = new Thickness(2, 0, 7, 0);
-                categoryChip.ToolTip = "点击切换应用分类";
+                categoryChip.Margin = new Thickness(2, 0, 5, 0);
                 Grid.SetColumn(categoryChip, 2);
                 grid.Children.Add(categoryChip);
+
+                GlyphButton folder = new GlyphButton("\uE8B7", "打开所在文件夹", 26);
+                folder.VerticalAlignment = VerticalAlignment.Center;
+                folder.Margin = new Thickness(0, 0, 5, 0);
+                AppMeta folderApp = app;
+                folder.Click += delegate { OpenAppFolder(folderApp); };
+                Grid.SetColumn(folder, 3);
+                grid.Children.Add(folder);
 
                 TextButton rename = new TextButton("改名", Ui.Accent);
                 rename.VerticalAlignment = VerticalAlignment.Center;
@@ -1617,7 +1902,7 @@ namespace TimeTrack
                 rename.ToolTip = "自定义这个应用显示的名称";
                 AppMeta renameApp = app;
                 rename.Click += delegate { RenameApp(renameApp); };
-                Grid.SetColumn(rename, 3);
+                Grid.SetColumn(rename, 4);
                 grid.Children.Add(rename);
 
                 Switch monitor = new Switch();
@@ -1630,7 +1915,7 @@ namespace TimeTrack
                     usage.Text = enabled ? UsageSummary(total) : "已忽略 · 不计入统计";
                     UpdateExcludedLabel(excludedLabel, apps);
                 };
-                Grid.SetColumn(monitor, 4);
+                Grid.SetColumn(monitor, 5);
                 grid.Children.Add(monitor);
 
                 row.Child = grid;

@@ -164,6 +164,65 @@ namespace TimeTrack
             }
         }
 
+        public List<string> GetCategories()
+        {
+            List<string> result = new List<string>(CategoryCatalog.Names);
+            lock (_gate)
+            {
+                if (_settings.CategoryColors != null)
+                {
+                    foreach (string name in _settings.CategoryColors.Keys)
+                    {
+                        if (string.IsNullOrEmpty(name) || CategoryCatalog.IsBuiltIn(name)) continue;
+                        if (!result.Contains(name)) result.Add(name);
+                    }
+                }
+                if (_settings.Categories != null)
+                {
+                    foreach (string name in _settings.Categories.Values)
+                    {
+                        string category = CategoryCatalog.Normalize(name);
+                        if (string.IsNullOrEmpty(category) || CategoryCatalog.IsBuiltIn(category)) continue;
+                        if (!result.Contains(category)) result.Add(category);
+                    }
+                }
+            }
+            return result;
+        }
+
+        public string GetCategoryColor(string category)
+        {
+            string name = CategoryCatalog.Normalize(category);
+            lock (_gate)
+            {
+                string color;
+                if (_settings.CategoryColors != null && _settings.CategoryColors.TryGetValue(name, out color))
+                {
+                    string normalized = CategoryCatalog.NormalizeColor(color);
+                    if (normalized != null) return normalized;
+                }
+            }
+            return CategoryCatalog.DefaultColor(name);
+        }
+
+        public bool AddCategory(string name, string color)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return false;
+            name = name.Trim();
+            if (name.Length > 12) return false;
+            color = CategoryCatalog.NormalizeColor(color);
+            if (color == null) color = "#64748B";
+            lock (_gate)
+            {
+                if (_settings.CategoryColors == null)
+                    _settings.CategoryColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                _settings.CategoryColors[name] = color;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+            return true;
+        }
+
         public void SetAutoBackup(bool enabled)
         {
             lock (_gate)
@@ -307,6 +366,19 @@ namespace TimeTrack
                 }
             }
             _settings.Categories = categories;
+
+            Dictionary<string, string> categoryColors = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (_settings.CategoryColors != null)
+            {
+                foreach (KeyValuePair<string, string> pair in _settings.CategoryColors)
+                {
+                    string name = CategoryCatalog.Normalize(pair.Key);
+                    string color = CategoryCatalog.NormalizeColor(pair.Value);
+                    if (string.IsNullOrEmpty(name) || color == null) continue;
+                    categoryColors[name] = color;
+                }
+            }
+            _settings.CategoryColors = categoryColors;
 
             if (_settings.RetentionDays < 7) _settings.RetentionDays = 90;
             if (_settings.CleanupIntervalDays < 1) _settings.CleanupIntervalDays = 30;
