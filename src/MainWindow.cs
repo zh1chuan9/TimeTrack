@@ -612,16 +612,16 @@ namespace TimeTrack
                 split.Margin = new Thickness(0, 7, 0, 0);
                 if (splitKnown > 0)
                 {
-                    split.Children.Add(SplitLegend("应用前台", Ui.Duration(data.ForegroundTotal), Ui.Accent));
+                    split.Children.Add(SplitLegend("应用前台总时长", Ui.Duration(data.ForegroundTotal), Ui.Accent));
                     split.Children.Add(Ui.TextBlock("     ", 10.5, Ui.Dim));
-                    split.Children.Add(SplitLegend("应用后台", Ui.Duration(data.BackgroundTotal), Ui.Green));
+                    split.Children.Add(SplitLegend("应用后台总时长", Ui.Duration(data.BackgroundTotal), Ui.Green));
                 }
                 if (data.UnclassifiedTotal > 0)
                 {
                     if (splitKnown > 0) split.Children.Add(Ui.TextBlock("  ·  ", 10, Ui.Dim));
                     string legacy = splitKnown > 0
-                        ? "应用历史 " + Ui.Duration(data.UnclassifiedTotal)
-                        : "应用历史未区分前后台（" + Ui.Duration(data.UnclassifiedTotal) + "）";
+                        ? "应用历史总时长 " + Ui.Duration(data.UnclassifiedTotal)
+                        : "应用历史总时长（未区分前后台） " + Ui.Duration(data.UnclassifiedTotal);
                     split.Children.Add(Ui.TextBlock(legacy, 10, Ui.Dim));
                 }
                 left.Children.Add(split);
@@ -1601,7 +1601,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.4.0", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.4.1", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
