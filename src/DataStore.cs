@@ -82,6 +82,11 @@ namespace TimeTrack
             get { lock (_gate) return _settings.TrackBackground; }
         }
 
+        public bool Lightweight
+        {
+            get { lock (_gate) return _settings.Lightweight; }
+        }
+
         public string GetDisplayName(string key, string fallback)
         {
             if (string.IsNullOrEmpty(key)) return fallback;
@@ -680,6 +685,17 @@ namespace TimeTrack
             {
                 if (_settings.TrackBackground == enabled) return;
                 _settings.TrackBackground = enabled;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetLightweight(bool enabled)
+        {
+            lock (_gate)
+            {
+                if (_settings.Lightweight == enabled) return;
+                _settings.Lightweight = enabled;
                 SaveSettingsLocked();
                 Interlocked.Increment(ref _version);
             }

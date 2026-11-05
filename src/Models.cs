@@ -88,6 +88,7 @@ namespace TimeTrack
         public bool AutoStart { get; set; }
         public bool Paused { get; set; }
         public bool TrackBackground { get; set; }
+        public bool Lightweight { get; set; }
         public Dictionary<string, string> CustomNames { get; set; }
         public int IdleSeconds { get; set; }
 
@@ -100,6 +101,7 @@ namespace TimeTrack
             AutoStart = false;
             Paused = false;
             TrackBackground = true;
+            Lightweight = false;
         }
     }
 

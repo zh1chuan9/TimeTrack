@@ -48,6 +48,9 @@ namespace TimeTrack
         private bool _exiting;
         private bool _disposed;
         private bool _trayHintShown;
+        private readonly bool _startHidden;
+        private bool? _statusPaused;
+        private int _trimTicks;
 
         private class AppFilterEntry
         {
@@ -57,6 +60,7 @@ namespace TimeTrack
 
         public MainWindow(bool startHidden)
         {
+            _startHidden = startHidden;
             Title = "时间统计";
             Width = Math.Min(1180, Math.Max(940, SystemParameters.WorkArea.Width - 160));
             Height = Math.Min(840, Math.Max(640, SystemParameters.WorkArea.Height - 120));
@@ -119,6 +123,8 @@ namespace TimeTrack
             _refreshTimer.Interval = TimeSpan.FromSeconds(15);
             _refreshTimer.Tick += OnRefreshTimer;
             _refreshTimer.Start();
+
+            ApplyLightweightMode();
 
             if (!startHidden)
             {
@@ -331,6 +337,7 @@ namespace TimeTrack
 
         private void AnimatePage(int direction)
         {
+            if (_store != null && _store.Lightweight) return;
             UIElement child = _content == null ? null : _content.Child as UIElement;
             if (child == null) return;
 
@@ -1205,6 +1212,15 @@ namespace TimeTrack
             };
             AddSettingRow(settings, SettingRow("记录后台应用", "应用最小化或在后台运行时也累计时长；多个应用可同时计时", backgroundSwitch), true);
 
+            Switch lightweightSwitch = new Switch();
+            lightweightSwitch.IsOn = _store.Lightweight;
+            lightweightSwitch.Toggled += delegate
+            {
+                _store.SetLightweight(lightweightSwitch.IsOn);
+                ApplyLightweightMode();
+            };
+            AddSettingRow(settings, SettingRow("轻量模式", "关闭页面过渡动画，降低界面刷新和后台扫描频率，减少 CPU 与内存占用", lightweightSwitch), true);
+
             int[] idleValues = new int[] { 60, 120, 300, 600 };
             string[] idleLabels = new string[] { "1 分钟", "2 分钟", "5 分钟", "10 分钟" };
             int idleIndex = 0;
@@ -1526,7 +1542,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.1.0", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.2.0", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
@@ -1749,13 +1765,29 @@ namespace TimeTrack
             return host;
         }
 
+        private void ApplyLightweightMode()
+        {
+            bool lightweight = _store != null && _store.Lightweight;
+            if (_tickTimer != null)
+                _tickTimer.Interval = TimeSpan.FromSeconds(lightweight ? 5 : 1);
+            if (_refreshTimer != null)
+                _refreshTimer.Interval = TimeSpan.FromSeconds(lightweight ? 30 : 15);
+            PerformanceMode.ApplyPriority(lightweight);
+            _trimTicks = 0;
+            if (lightweight && !IsVisible && _startHidden) PerformanceMode.TrimWorkingSet();
+        }
+
         private void UpdateStatus()
         {
             if (_disposed || _statusLabel == null) return;
             bool paused = _store != null && _store.IsPaused;
-            _statusLabel.Text = paused ? "已暂停" : "正在记录";
-            _statusDot.Background = paused ? Ui.Amber : Ui.Green;
-            _statusPill.Background = paused ? Ui.AmberSoft : Ui.GreenSoft;
+            if (!_statusPaused.HasValue || _statusPaused.Value != paused)
+            {
+                _statusPaused = paused;
+                _statusLabel.Text = paused ? "已暂停" : "正在记录";
+                _statusDot.Background = paused ? Ui.Amber : Ui.Green;
+                _statusPill.Background = paused ? Ui.AmberSoft : Ui.GreenSoft;
+            }
             if (_tray != null)
             {
                 string text = paused ? "时间统计 · 已暂停" : "时间统计 · 正在记录";
@@ -1773,6 +1805,19 @@ namespace TimeTrack
                 _lastToday = today;
                 if (_anchor.Date == previous) _anchor = today;
                 if (_view == "dashboard") Rebuild(false);
+            }
+            if (_store.Lightweight && !IsVisible)
+            {
+                _trimTicks++;
+                if (_trimTicks >= 60)
+                {
+                    _trimTicks = 0;
+                    PerformanceMode.TrimWorkingSet();
+                }
+            }
+            else
+            {
+                _trimTicks = 0;
             }
             UpdateStatus();
         }
@@ -1794,6 +1839,7 @@ namespace TimeTrack
             Topmost = true;
             Topmost = false;
             UpdateContentWidth();
+            _trimTicks = 0;
             UpdateStatus();
             if (_view == "dashboard") Rebuild(false);
         }
@@ -1903,6 +1949,9 @@ namespace TimeTrack
             }
             e.Cancel = true;
             Hide();
+            _trimTicks = 0;
+            if (_store != null && _store.Lightweight)
+                Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(PerformanceMode.TrimWorkingSet));
             if (!_trayHintShown)
             {
                 _trayHintShown = true;

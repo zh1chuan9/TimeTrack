@@ -192,8 +192,9 @@ namespace TimeTrack
         private List<AppIdentity> GetBackgroundApps()
         {
             DateTime now = DateTime.UtcNow;
+            double interval = _store.Lightweight ? 5.0 : 2.0;
             if (_lastBackgroundScan != DateTime.MinValue &&
-                (now - _lastBackgroundScan).TotalSeconds < 2.0)
+                (now - _lastBackgroundScan).TotalSeconds < interval)
             {
                 return _backgroundApps;
             }
