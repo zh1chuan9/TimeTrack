@@ -1219,7 +1219,7 @@ namespace TimeTrack
                 _store.SetLightweight(lightweightSwitch.IsOn);
                 ApplyLightweightMode();
             };
-            AddSettingRow(settings, SettingRow("轻量模式", "关闭页面过渡动画，降低界面刷新和后台扫描频率，减少 CPU 与内存占用", lightweightSwitch), true);
+            AddSettingRow(settings, SettingRow("轻量模式", "关闭页面过渡动画，降低界面刷新和后台扫描频率，减少处理器与内存占用", lightweightSwitch), true);
 
             int[] idleValues = new int[] { 60, 120, 300, 600 };
             string[] idleLabels = new string[] { "1 分钟", "2 分钟", "5 分钟", "10 分钟" };
@@ -1542,7 +1542,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.2.0", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.2.1", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
