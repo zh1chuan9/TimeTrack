@@ -99,6 +99,10 @@ namespace TimeTrack
                 return;
             }
 
+            // One tick equals one second of actual computer use, regardless of
+            // how many apps are visible at the same time.
+            _store.AddActiveSecond(DateTime.Now);
+
             AppIdentity foreground = null;
             bool selfForeground = false;
             bool excludedForeground = false;

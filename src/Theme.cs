@@ -14,6 +14,9 @@ namespace TimeTrack
 {
     public static class Ui
     {
+        public static bool IsDark = true;
+        public static event EventHandler ThemeChanged;
+
         public static readonly Brush Bg = BrushFrom("#0B0C0F");
         public static readonly Brush BgSoft = BrushFrom("#101216");
         public static readonly Brush Card = BrushFrom("#17191F");
@@ -35,6 +38,18 @@ namespace TimeTrack
         public static readonly Brush Red = BrushFrom("#F26D78");
         public static readonly Brush RedSoft = BrushFrom("#2B171B");
         public static readonly Brush Track = BrushFrom("#2A2E37");
+        public static readonly Brush TitleBar = BrushFrom("#0D0F13");
+        public static readonly Brush TitleBarBorder = BrushFrom("#1C1F26");
+        public static readonly Brush CardHover = BrushFrom("#252A34");
+        public static readonly Brush DangerHover = BrushFrom("#3A1E24");
+        public static readonly Brush DangerBorder = BrushFrom("#4A252B");
+        public static readonly Brush AccentHover = BrushFrom("#2F6FE0");
+        public static readonly Brush TrackHover = BrushFrom("#3B404A");
+        public static readonly Brush HoverOverlay = BrushFrom("#14FFFFFF");
+        public static readonly Brush TipBg = BrushFrom("#FA181B22");
+        public static readonly Brush ChromeGlyphHover = BrushFrom("#FFFFFF");
+        public static readonly Brush CloseHover = BrushFrom("#C42B1C");
+        public static readonly Brush DangerText = BrushFrom("#FF9AA4");
         public static readonly LinearGradientBrush AccentGradient = BuildAccentGradient();
         public static readonly LinearGradientBrush LogoGradient = BuildLogoGradient();
 
@@ -48,9 +63,93 @@ namespace TimeTrack
 
         public static Brush BrushFrom(string hex)
         {
-            SolidColorBrush brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
-            brush.Freeze();
-            return brush;
+            return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        }
+
+        public static void ApplyTheme(bool dark)
+        {
+            IsDark = dark;
+            if (dark)
+            {
+                SetColor(Bg, "#0B0C0F");
+                SetColor(BgSoft, "#101216");
+                SetColor(Card, "#17191F");
+                SetColor(Card2, "#1D2027");
+                SetColor(Field, "#111318");
+                SetColor(Stroke, "#2A2E37");
+                SetColor(StrokeSoft, "#22252C");
+                SetColor(Text, "#F3F5F8");
+                SetColor(TextSoft, "#C9CDD4");
+                SetColor(Muted, "#969CA6");
+                SetColor(Dim, "#6C727D");
+                SetColor(Accent, "#3B82F6");
+                SetColor(AccentLight, "#6EA8FF");
+                SetColor(AccentSoft, "#1A2A44");
+                SetColor(Green, "#35D399");
+                SetColor(GreenSoft, "#12261D");
+                SetColor(Amber, "#F5B34A");
+                SetColor(AmberSoft, "#2A2114");
+                SetColor(Red, "#F26D78");
+                SetColor(RedSoft, "#2B171B");
+                SetColor(Track, "#2A2E37");
+                SetColor(TitleBar, "#0D0F13");
+                SetColor(TitleBarBorder, "#1C1F26");
+                SetColor(CardHover, "#252A34");
+                SetColor(DangerHover, "#3A1E24");
+                SetColor(DangerBorder, "#4A252B");
+                SetColor(AccentHover, "#2F6FE0");
+                SetColor(TrackHover, "#3B404A");
+                SetColor(HoverOverlay, "#14FFFFFF");
+                SetColor(TipBg, "#FA181B22");
+                SetColor(ChromeGlyphHover, "#FFFFFF");
+                SetColor(CloseHover, "#C42B1C");
+                SetColor(DangerText, "#FF9AA4");
+            }
+            else
+            {
+                SetColor(Bg, "#F3F5F9");
+                SetColor(BgSoft, "#EAEFF7");
+                SetColor(Card, "#FFFFFF");
+                SetColor(Card2, "#F2F6FC");
+                SetColor(Field, "#F7F9FD");
+                SetColor(Stroke, "#D9E0EA");
+                SetColor(StrokeSoft, "#E8EDF4");
+                SetColor(Text, "#151A21");
+                SetColor(TextSoft, "#49515E");
+                SetColor(Muted, "#6B7280");
+                SetColor(Dim, "#98A0AC");
+                SetColor(Accent, "#2563EB");
+                SetColor(AccentLight, "#1D4ED8");
+                SetColor(AccentSoft, "#E4EDFF");
+                SetColor(Green, "#0F9F6E");
+                SetColor(GreenSoft, "#E3F7EF");
+                SetColor(Amber, "#D97706");
+                SetColor(AmberSoft, "#FEF3C7");
+                SetColor(Red, "#DC2626");
+                SetColor(RedSoft, "#FEE2E2");
+                SetColor(Track, "#E4EAF2");
+                SetColor(TitleBar, "#FFFFFF");
+                SetColor(TitleBarBorder, "#E3E8F0");
+                SetColor(CardHover, "#EEF3FA");
+                SetColor(DangerHover, "#FDE8E8");
+                SetColor(DangerBorder, "#F5C2C2");
+                SetColor(AccentHover, "#1D4ED8");
+                SetColor(TrackHover, "#D5DEEA");
+                SetColor(HoverOverlay, "#12000000");
+                SetColor(TipBg, "#FFFFFFFF");
+                SetColor(ChromeGlyphHover, "#1F2937");
+                SetColor(CloseHover, "#C42B1C");
+                SetColor(DangerText, "#B91C1C");
+            }
+            EventHandler handler = ThemeChanged;
+            if (handler != null) handler(null, EventArgs.Empty);
+        }
+
+        private static void SetColor(Brush brush, string hex)
+        {
+            SolidColorBrush solid = brush as SolidColorBrush;
+            if (solid == null || solid.IsFrozen) return;
+            solid.Color = (Color)ColorConverter.ConvertFromString(hex);
         }
 
         private static LinearGradientBrush BuildAccentGradient()

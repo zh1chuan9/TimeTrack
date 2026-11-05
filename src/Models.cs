@@ -58,9 +58,16 @@ namespace TimeTrack
         public string Date { get; set; }
         public Dictionary<string, AppUsage> Apps { get; set; }
 
+        /// <summary>Wall-clock seconds on which the computer was actually in use.</summary>
+        public long ActiveSeconds { get; set; }
+
+        /// <summary>Active seconds split by hour; unlike app sums, overlapping apps count once.</summary>
+        public long[] ActiveHours { get; set; }
+
         public DayData()
         {
             Apps = new Dictionary<string, AppUsage>(StringComparer.OrdinalIgnoreCase);
+            ActiveHours = new long[24];
         }
 
         public long Total
@@ -89,6 +96,7 @@ namespace TimeTrack
         public bool Paused { get; set; }
         public bool TrackBackground { get; set; }
         public bool Lightweight { get; set; }
+        public bool DarkMode { get; set; }
         public Dictionary<string, string> CustomNames { get; set; }
         public int IdleSeconds { get; set; }
 
@@ -102,6 +110,7 @@ namespace TimeTrack
             Paused = false;
             TrackBackground = true;
             Lightweight = false;
+            DarkMode = true;
         }
     }
 

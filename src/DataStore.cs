@@ -87,6 +87,11 @@ namespace TimeTrack
             get { lock (_gate) return _settings.Lightweight; }
         }
 
+        public bool DarkMode
+        {
+            get { lock (_gate) return _settings.DarkMode; }
+        }
+
         public string GetDisplayName(string key, string fallback)
         {
             if (string.IsNullOrEmpty(key)) return fallback;
@@ -273,6 +278,36 @@ namespace TimeTrack
             }
         }
 
+        /// <summary>
+        /// Counts one wall-clock second of computer activity. Call this once per
+        /// sampler tick, before recording individual apps, so concurrent apps do
+        /// not inflate the headline "computer usage" total.
+        /// </summary>
+        public void AddActiveSecond(DateTime now)
+        {
+            lock (_gate)
+            {
+                if (_disposed || _settings.Paused) return;
+
+                DayData day = GetDayLocked(now.Date);
+                day.ActiveHours = NormalizeHours(day.ActiveHours);
+                if (day.ActiveSeconds < 0) day.ActiveSeconds = 0;
+
+                int hour = now.Hour;
+                if (hour < 0) hour = 0;
+                if (hour > 23) hour = 23;
+                day.ActiveSeconds = day.ActiveSeconds + 1;
+                day.ActiveHours[hour] = day.ActiveHours[hour] + 1;
+
+                _today = day;
+                _dirty = true;
+                if (_lastSave == DateTime.MinValue || (now - _lastSave).TotalSeconds >= 10)
+                {
+                    SaveTodayLocked();
+                }
+            }
+        }
+
         public void Flush()
         {
             lock (_gate)
@@ -317,6 +352,7 @@ namespace TimeTrack
                 usage.ForegroundHours = NormalizeHours(usage.ForegroundHours);
                 usage.BackgroundHours = NormalizeHours(usage.BackgroundHours);
             }
+            EnsureActiveSeconds(day);
 
             _cache[key] = day;
             return day;
@@ -329,6 +365,45 @@ namespace TimeTrack
             long[] fixedHours = new long[24];
             Array.Copy(values, fixedHours, Math.Min(24, values.Length));
             return fixedHours;
+        }
+
+        private static void EnsureActiveSeconds(DayData day)
+        {
+            day.ActiveHours = NormalizeHours(day.ActiveHours);
+
+            long hourSum = 0;
+            for (int h = 0; h < 24; h++) hourSum += day.ActiveHours[h];
+
+            if (day.ActiveSeconds <= 0)
+            {
+                if (hourSum > 0)
+                {
+                    day.ActiveSeconds = hourSum;
+                    return;
+                }
+
+                // Days recorded before ActiveSeconds existed only have per-app
+                // totals. Cap each hour at 3600s so simultaneous apps cannot
+                // produce a day longer than the wall clock.
+                if (day.Apps != null && day.Apps.Count > 0)
+                {
+                    long estimate = 0;
+                    for (int h = 0; h < 24; h++)
+                    {
+                        long sum = 0;
+                        foreach (AppUsage usage in day.Apps.Values)
+                        {
+                            if (usage != null && usage.Hours != null && h < usage.Hours.Length)
+                                sum += usage.Hours[h];
+                        }
+                        if (sum > 3600) sum = 3600;
+                        if (sum < 0) sum = 0;
+                        day.ActiveHours[h] = sum;
+                        estimate += sum;
+                    }
+                    day.ActiveSeconds = estimate;
+                }
+            }
         }
 
         private void SaveTodayLocked()
@@ -401,7 +476,6 @@ namespace TimeTrack
                 for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
                 {
                     DayData day = GetDayLocked(date);
-                    long dayTotal = 0;
 
                     foreach (AppUsage usage in day.Apps.Values)
                     {
@@ -412,8 +486,6 @@ namespace TimeTrack
 
                         long appTotal = usage.Total;
                         if (appTotal <= 0) continue;
-
-                        dayTotal += appTotal;
 
                         AppAgg agg;
                         if (!aggregate.TryGetValue(usage.Key, out agg))
@@ -437,21 +509,18 @@ namespace TimeTrack
                         result.UnclassifiedTotal += unclassified;
                         if (!string.IsNullOrEmpty(usage.Name)) agg.Name = usage.Name;
                         if (!string.IsNullOrEmpty(usage.Path)) agg.Path = usage.Path;
-
-                        for (int h = 0; h < 24; h++)
-                            result.HourBins[h] += usage.Hours[h];
                     }
 
-                    if (Equals(date, today) && dayTotal == 0 && !includeAll)
-                    {
-                        // still keep the empty day for chart alignment
-                    }
+                    long active = day.ActiveSeconds;
+                    if (active < 0) active = 0;
+                    for (int h = 0; h < 24; h++)
+                        result.HourBins[h] += day.ActiveHours[h];
 
                     DayBar bar = new DayBar();
                     bar.Date = date;
-                    bar.Seconds = dayTotal;
+                    bar.Seconds = active;
                     result.Days.Add(bar);
-                    result.Total += dayTotal;
+                    result.Total += active;
                 }
 
                 if (_settings.CustomNames != null)
@@ -696,6 +765,17 @@ namespace TimeTrack
             {
                 if (_settings.Lightweight == enabled) return;
                 _settings.Lightweight = enabled;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetDarkMode(bool enabled)
+        {
+            lock (_gate)
+            {
+                if (_settings.DarkMode == enabled) return;
+                _settings.DarkMode = enabled;
                 SaveSettingsLocked();
                 Interlocked.Increment(ref _version);
             }

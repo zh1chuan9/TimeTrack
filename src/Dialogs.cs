@@ -58,14 +58,14 @@ namespace TimeTrack
             buttons.HorizontalAlignment = HorizontalAlignment.Right;
             buttons.Margin = new Thickness(0, 26, 0, 0);
 
-            Border cancel = DialogButton("取消", Ui.TextSoft, Ui.Card2, Ui.BrushFrom("#2B303A"));
+            Border cancel = DialogButton("取消", Ui.TextSoft, Ui.Card2, Ui.CardHover);
             cancel.Margin = new Thickness(0, 0, 10, 0);
             cancel.MouseLeftButtonUp += delegate { Close(); };
             buttons.Children.Add(cancel);
 
-            Brush confirmBackground = danger ? Ui.BrushFrom("#3A1D22") : Ui.Accent;
-            Brush confirmHover = danger ? Ui.BrushFrom("#4B242B") : Ui.BrushFrom("#2F6FE0");
-            Brush confirmForeground = danger ? Ui.BrushFrom("#FF9AA4") : Brushes.White;
+            Brush confirmBackground = danger ? Ui.RedSoft : Ui.Accent;
+            Brush confirmHover = danger ? Ui.DangerHover : Ui.AccentHover;
+            Brush confirmForeground = danger ? Ui.DangerText : Brushes.White;
             Border confirm = DialogButton(confirmText, confirmForeground, confirmBackground, confirmHover);
             confirm.MouseLeftButtonUp += delegate
             {
@@ -173,12 +173,12 @@ namespace TimeTrack
             buttons.HorizontalAlignment = HorizontalAlignment.Right;
             buttons.Margin = new Thickness(0, 24, 0, 0);
 
-            Border cancel = DialogButton("取消", Ui.TextSoft, Ui.Card2, Ui.BrushFrom("#2B303A"));
+            Border cancel = DialogButton("取消", Ui.TextSoft, Ui.Card2, Ui.CardHover);
             cancel.Margin = new Thickness(0, 0, 10, 0);
             cancel.MouseLeftButtonUp += delegate { Close(); };
             buttons.Children.Add(cancel);
 
-            Border save = DialogButton("保存", Brushes.White, Ui.Accent, Ui.BrushFrom("#2F6FE0"));
+            Border save = DialogButton("保存", Brushes.White, Ui.Accent, Ui.AccentHover);
             save.MouseLeftButtonUp += delegate { Accept(); };
             buttons.Children.Add(save);
             layout.Children.Add(buttons);

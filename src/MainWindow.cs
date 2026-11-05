@@ -32,6 +32,7 @@ namespace TimeTrack
         private Border _statusPill;
         private Border _statusDot;
         private TextBlock _statusLabel;
+        private System.Windows.Shapes.Ellipse _glow;
 
         private string _view = "dashboard";
         private int _rangeMode;
@@ -61,6 +62,9 @@ namespace TimeTrack
         public MainWindow(bool startHidden)
         {
             _startHidden = startHidden;
+            _store = new DataStore();
+            Ui.ApplyTheme(_store.DarkMode);
+
             Title = "时间统计";
             Width = Math.Min(1180, Math.Max(940, SystemParameters.WorkArea.Width - 160));
             Height = Math.Min(840, Math.Max(640, SystemParameters.WorkArea.Height - 120));
@@ -83,7 +87,6 @@ namespace TimeTrack
             WindowChrome.SetWindowChrome(this, chrome);
             WindowFx.Apply(this);
 
-            _store = new DataStore();
             _tracker = new Tracker(_store);
             _lastVersion = _store.Version;
 
@@ -154,7 +157,9 @@ namespace TimeTrack
             glowBrush.GradientStops.Add(new GradientStop(Color.FromArgb(0, 59, 130, 246), 1));
             glowBrush.Freeze();
             glow.Fill = glowBrush;
+            glow.Opacity = Ui.IsDark ? 1.0 : 0.5;
             glow.IsHitTestVisible = false;
+            _glow = glow;
             Grid.SetRow(glow, 1);
             root.Children.Add(glow);
 
@@ -184,8 +189,8 @@ namespace TimeTrack
         {
             Border bar = new Border();
             bar.Height = 56;
-            bar.Background = Ui.BrushFrom("#0D0F13");
-            bar.BorderBrush = Ui.BrushFrom("#1C1F26");
+            bar.Background = Ui.TitleBar;
+            bar.BorderBrush = Ui.TitleBarBorder;
             bar.BorderThickness = new Thickness(0, 0, 0, 1);
             bar.Padding = new Thickness(18, 0, 10, 0);
 
@@ -240,16 +245,16 @@ namespace TimeTrack
             _statusPill.Child = statusContent;
             right.Children.Add(_statusPill);
 
-            Border settings = ChromeButton("\uE713", "设置", Ui.BrushFrom("#1D2129"), Brushes.White, ToggleSettings);
+            Border settings = ChromeButton("\uE713", "设置", Ui.CardHover, Ui.ChromeGlyphHover, ToggleSettings);
             settings.Margin = new Thickness(2, 0, 2, 0);
             right.Children.Add(settings);
 
-            Border minimize = ChromeButton("\uE921", "最小化", Ui.BrushFrom("#1D2129"), Brushes.White,
+            Border minimize = ChromeButton("\uE921", "最小化", Ui.CardHover, Ui.ChromeGlyphHover,
                 delegate { WindowState = WindowState.Minimized; });
             minimize.Margin = new Thickness(2, 0, 2, 0);
             right.Children.Add(minimize);
 
-            Border close = ChromeButton("\uE8BB", "关闭到托盘", Ui.BrushFrom("#C42B1C"), Brushes.White,
+            Border close = ChromeButton("\uE8BB", "关闭到托盘", Ui.CloseHover, Brushes.White,
                 delegate { Close(); });
             close.Margin = new Thickness(2, 0, 0, 0);
             right.Children.Add(close);
@@ -551,7 +556,7 @@ namespace TimeTrack
             }
             else
             {
-                subline.Children.Add(Ui.TextBlock((background ? "累计时长 " : "总时长 "), 11.5, Ui.Dim));
+                subline.Children.Add(Ui.TextBlock("电脑累计 ", 11.5, Ui.Dim));
                 subline.Children.Add(Ui.TextBlock(Ui.Duration(data.Total), 11.5, Ui.Accent, FontWeights.SemiBold));
                 subline.Children.Add(Ui.TextBlock("  ·  记录 " + data.DayCount + " 天", 11.5, Ui.Dim));
             }
@@ -565,16 +570,16 @@ namespace TimeTrack
                 split.Margin = new Thickness(0, 7, 0, 0);
                 if (splitKnown > 0)
                 {
-                    split.Children.Add(SplitLegend("前台", Ui.Duration(data.ForegroundTotal), Ui.Accent));
+                    split.Children.Add(SplitLegend("应用前台", Ui.Duration(data.ForegroundTotal), Ui.Accent));
                     split.Children.Add(Ui.TextBlock("     ", 10.5, Ui.Dim));
-                    split.Children.Add(SplitLegend("后台", Ui.Duration(data.BackgroundTotal), Ui.Green));
+                    split.Children.Add(SplitLegend("应用后台", Ui.Duration(data.BackgroundTotal), Ui.Green));
                 }
                 if (data.UnclassifiedTotal > 0)
                 {
                     if (splitKnown > 0) split.Children.Add(Ui.TextBlock("  ·  ", 10, Ui.Dim));
                     string legacy = splitKnown > 0
-                        ? "历史未区分 " + Ui.Duration(data.UnclassifiedTotal)
-                        : "旧记录未区分前台/后台（" + Ui.Duration(data.UnclassifiedTotal) + "）";
+                        ? "应用历史 " + Ui.Duration(data.UnclassifiedTotal)
+                        : "应用历史未区分前后台（" + Ui.Duration(data.UnclassifiedTotal) + "）";
                     split.Children.Add(Ui.TextBlock(legacy, 10, Ui.Dim));
                 }
                 left.Children.Add(split);
@@ -1192,6 +1197,18 @@ namespace TimeTrack
             heading.Children.Add(subtitle);
             page.Children.Add(heading);
 
+            page.Children.Add(SectionHeader("外观"));
+            StackPanel appearance = new StackPanel();
+            Switch darkSwitch = new Switch();
+            darkSwitch.IsOn = _store.DarkMode;
+            darkSwitch.Toggled += delegate
+            {
+                _store.SetDarkMode(darkSwitch.IsOn);
+                ApplyTheme(darkSwitch.IsOn);
+            };
+            AddSettingRow(appearance, SettingRow("深色模式", "关闭后使用浅色界面，切换会立即生效并记住选择", darkSwitch), false);
+            page.Children.Add(Ui.CardSurface(appearance, 0));
+
             page.Children.Add(SectionHeader("记录设置"));
             StackPanel settings = new StackPanel();
 
@@ -1542,7 +1559,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.2.1", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.3.0", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
@@ -1581,7 +1598,9 @@ namespace TimeTrack
             desc.Margin = new Thickness(0, 4, 0, 0);
             desc.TextWrapping = TextWrapping.Wrap;
             desc.MaxWidth = 520;
+            desc.HorizontalAlignment = HorizontalAlignment.Left;
             desc.ToolTip = description;
+            text.HorizontalAlignment = HorizontalAlignment.Left;
             text.Children.Add(desc);
             Grid.SetColumn(text, 0);
             grid.Children.Add(text);
@@ -1676,10 +1695,10 @@ namespace TimeTrack
         private Border PillButton(string text, string glyph, Brush foreground, bool danger, Action action)
         {
             Brush normal = danger ? Ui.RedSoft : Ui.Card2;
-            Brush hover = danger ? Ui.BrushFrom("#3A1E24") : Ui.BrushFrom("#252A34");
+            Brush hover = danger ? Ui.DangerHover : Ui.CardHover;
             Border button = new Border();
             button.Background = normal;
-            button.BorderBrush = danger ? Ui.BrushFrom("#4A252B") : Ui.Stroke;
+            button.BorderBrush = danger ? Ui.DangerBorder : Ui.Stroke;
             button.BorderThickness = new Thickness(1);
             button.CornerRadius = new CornerRadius(9);
             button.Padding = new Thickness(12, 7, 12, 7);
@@ -1763,6 +1782,28 @@ namespace TimeTrack
 
             frame.Child = inner;
             return host;
+        }
+
+        private void ApplyTheme(bool dark)
+        {
+            Ui.ApplyTheme(dark);
+            WindowFx.SetDark(this, dark);
+            ApplyTrayTheme();
+            if (_glow != null) _glow.Opacity = dark ? 1.0 : 0.5;
+        }
+
+        private void ApplyTrayTheme()
+        {
+            if (_trayMenu == null) return;
+            bool dark = Ui.IsDark;
+            _trayMenu.BackColor = dark
+                ? Drawing.Color.FromArgb(23, 25, 31)
+                : Drawing.Color.White;
+            _trayMenu.ForeColor = dark
+                ? Drawing.Color.FromArgb(224, 228, 234)
+                : Drawing.Color.FromArgb(31, 41, 55);
+            _trayMenu.Renderer = new DarkMenuRenderer();
+            _trayMenu.Invalidate();
         }
 
         private void ApplyLightweightMode()
@@ -1851,12 +1892,10 @@ namespace TimeTrack
                 _trayIcon = TrayIconFactory.Load();
                 _trayMenu = new WinForms.ContextMenuStrip();
                 _trayMenu.Font = new Drawing.Font("Microsoft YaHei UI", 9f);
-                _trayMenu.BackColor = Drawing.Color.FromArgb(23, 25, 31);
-                _trayMenu.ForeColor = Drawing.Color.FromArgb(224, 228, 234);
                 _trayMenu.ShowImageMargin = false;
                 _trayMenu.ShowCheckMargin = true;
-                _trayMenu.Renderer = new DarkMenuRenderer();
                 _trayMenu.Padding = new WinForms.Padding(4, 4, 4, 4);
+                ApplyTrayTheme();
 
                 WinForms.ToolStripMenuItem openItem = new WinForms.ToolStripMenuItem("打开时间统计");
                 openItem.Font = new Drawing.Font("Microsoft YaHei UI", 9f, Drawing.FontStyle.Bold);

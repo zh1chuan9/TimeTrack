@@ -24,25 +24,49 @@ namespace TimeTrack
                 try
                 {
                     IntPtr handle = new WindowInteropHelper(window).Handle;
-                    int dark = 1;
-                    DwmSetWindowAttribute(handle, DwmUseImmersiveDarkMode, ref dark, sizeof(int));
                     int round = 2;
                     DwmSetWindowAttribute(handle, DwmWindowCornerPreference, ref round, sizeof(int));
-                    int border = 0x002B231F;
-                    DwmSetWindowAttribute(handle, DwmBorderColor, ref border, sizeof(int));
                 }
                 catch
                 {
                 }
+                SetDark(window, Ui.IsDark);
             };
+        }
+
+        public static void SetDark(Window window, bool dark)
+        {
+            try
+            {
+                IntPtr handle = new WindowInteropHelper(window).Handle;
+                if (handle == IntPtr.Zero) return;
+                int immersive = dark ? 1 : 0;
+                DwmSetWindowAttribute(handle, DwmUseImmersiveDarkMode, ref immersive, sizeof(int));
+                int border = dark ? 0x002B231F : 0x00ECE3DD;
+                DwmSetWindowAttribute(handle, DwmBorderColor, ref border, sizeof(int));
+            }
+            catch
+            {
+            }
         }
     }
 
     public class DarkMenuColorTable : WinForms.ProfessionalColorTable
     {
-        private static readonly Drawing.Color Surface = Drawing.Color.FromArgb(23, 25, 31);
-        private static readonly Drawing.Color Hover = Drawing.Color.FromArgb(43, 48, 59);
-        private static readonly Drawing.Color Line = Drawing.Color.FromArgb(45, 49, 58);
+        private static Drawing.Color Surface
+        {
+            get { return Ui.IsDark ? Drawing.Color.FromArgb(23, 25, 31) : Drawing.Color.White; }
+        }
+
+        private static Drawing.Color Hover
+        {
+            get { return Ui.IsDark ? Drawing.Color.FromArgb(43, 48, 59) : Drawing.Color.FromArgb(238, 243, 250); }
+        }
+
+        private static Drawing.Color Line
+        {
+            get { return Ui.IsDark ? Drawing.Color.FromArgb(45, 49, 58) : Drawing.Color.FromArgb(226, 232, 240); }
+        }
 
         public override Drawing.Color ToolStripDropDownBackground { get { return Surface; } }
         public override Drawing.Color ImageMarginGradientBegin { get { return Surface; } }
@@ -68,7 +92,9 @@ namespace TimeTrack
 
         protected override void OnRenderItemText(WinForms.ToolStripItemTextRenderEventArgs e)
         {
-            e.TextColor = e.Item.Selected ? Drawing.Color.White : Drawing.Color.FromArgb(224, 228, 234);
+            e.TextColor = e.Item.Selected
+                ? (Ui.IsDark ? Drawing.Color.White : Drawing.Color.FromArgb(15, 23, 42))
+                : (Ui.IsDark ? Drawing.Color.FromArgb(224, 228, 234) : Drawing.Color.FromArgb(31, 41, 55));
             base.OnRenderItemText(e);
         }
 

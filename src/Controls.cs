@@ -12,6 +12,7 @@ namespace TimeTrack
     {
         private bool _isOn;
         private bool _hover;
+        private readonly EventHandler _themeHandler;
 
         public event EventHandler Toggled;
 
@@ -20,6 +21,9 @@ namespace TimeTrack
             Width = 44;
             Height = 24;
             Cursor = Cursors.Hand;
+            _themeHandler = delegate { InvalidateVisual(); };
+            Ui.ThemeChanged += _themeHandler;
+            Unloaded += delegate { Ui.ThemeChanged -= _themeHandler; };
             MouseEnter += delegate { _hover = true; InvalidateVisual(); };
             MouseLeave += delegate { _hover = false; InvalidateVisual(); };
             MouseLeftButtonUp += delegate
@@ -48,7 +52,7 @@ namespace TimeTrack
             double h = ActualHeight;
             if (w <= 0 || h <= 0) return;
 
-            Brush track = _isOn ? Ui.Accent : (_hover ? Ui.BrushFrom("#3B404A") : Ui.BrushFrom("#343841"));
+            Brush track = _isOn ? Ui.Accent : (_hover ? Ui.TrackHover : Ui.Track);
             Opacity = IsEnabled ? 1 : 0.45;
             dc.DrawRoundedRectangle(track, null, new Rect(0, 0, w, h), h / 2, h / 2);
 
@@ -61,11 +65,15 @@ namespace TimeTrack
     public class UsageBar : FrameworkElement
     {
         private double _ratio;
+        private readonly EventHandler _themeHandler;
 
         public UsageBar()
         {
             Height = 4;
             Margin = new Thickness(0, 6, 0, 0);
+            _themeHandler = delegate { InvalidateVisual(); };
+            Ui.ThemeChanged += _themeHandler;
+            Unloaded += delegate { Ui.ThemeChanged -= _themeHandler; };
         }
 
         public double Ratio
@@ -173,9 +181,10 @@ namespace TimeTrack
         private bool _hasMouse;
         private readonly Typeface _typeface;
         private readonly Typeface _typefaceBold;
-        private static readonly Brush TipBg = Ui.BrushFrom("#FA181B22");
+        private readonly EventHandler _themeHandler;
+        private static readonly Brush TipBg = Ui.TipBg;
         private static readonly Brush TipShadow = Ui.BrushFrom("#4D000000");
-        private static readonly Pen TipBorder = BuildTipBorder();
+        private static readonly Pen TipBorder = new Pen(Ui.StrokeSoft, 1);
 
         public UsageChart()
         {
@@ -184,6 +193,9 @@ namespace TimeTrack
             SnapsToDevicePixels = true;
             _typeface = new Typeface(Ui.Font, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
             _typefaceBold = new Typeface(Ui.Font, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+            _themeHandler = delegate { InvalidateVisual(); };
+            Ui.ThemeChanged += _themeHandler;
+            Unloaded += delegate { Ui.ThemeChanged -= _themeHandler; };
             MouseMove += OnChartMouseMove;
             MouseLeave += delegate
             {
@@ -191,13 +203,6 @@ namespace TimeTrack
                 _hasMouse = false;
                 InvalidateVisual();
             };
-        }
-
-        private static Pen BuildTipBorder()
-        {
-            Pen pen = new Pen(Ui.BrushFrom("#3A4150"), 1);
-            pen.Freeze();
-            return pen;
         }
 
         public void SetData(List<ChartItem> items, bool hourly, long average)
@@ -288,12 +293,9 @@ namespace TimeTrack
             double baseY = top + plotHeight;
 
             Pen axisPen = new Pen(Ui.Stroke, 1);
-            axisPen.Freeze();
-            Pen gridPen = new Pen(Ui.BrushFrom("#23262E"), 1);
-            gridPen.Freeze();
-            Pen dashPen = new Pen(Ui.BrushFrom("#59606D"), 1);
+            Pen gridPen = new Pen(Ui.StrokeSoft, 1);
+            Pen dashPen = new Pen(Ui.Muted, 1);
             dashPen.DashStyle = DashStyles.Dash;
-            dashPen.Freeze();
 
             dc.DrawLine(axisPen, new Point(left, baseY), new Point(left + plotWidth, baseY));
             dc.DrawLine(axisPen, new Point(left, top), new Point(left + plotWidth, top));
@@ -326,7 +328,7 @@ namespace TimeTrack
                 if (_hover >= 0 && _hover < count)
                 {
                     double slotHover = plotWidth / count;
-                    Brush overlay = Ui.BrushFrom("#14FFFFFF");
+                    Brush overlay = Ui.HoverOverlay;
                     dc.DrawRoundedRectangle(overlay, null,
                         new Rect(left + _hover * slotHover + 1, top, Math.Max(1, slotHover - 2), plotHeight), 6, 6);
                 }
