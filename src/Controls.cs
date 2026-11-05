@@ -169,8 +169,13 @@ namespace TimeTrack
         private bool _hourly;
         private long _average;
         private int _hover = -1;
+        private Point _mouse;
+        private bool _hasMouse;
         private readonly Typeface _typeface;
         private readonly Typeface _typefaceBold;
+        private static readonly Brush TipBg = Ui.BrushFrom("#FA181B22");
+        private static readonly Brush TipShadow = Ui.BrushFrom("#4D000000");
+        private static readonly Pen TipBorder = BuildTipBorder();
 
         public UsageChart()
         {
@@ -179,15 +184,20 @@ namespace TimeTrack
             SnapsToDevicePixels = true;
             _typeface = new Typeface(Ui.Font, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
             _typefaceBold = new Typeface(Ui.Font, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-            ToolTipService.SetInitialShowDelay(this, 150);
-            ToolTipService.SetShowDuration(this, 60000);
             MouseMove += OnChartMouseMove;
             MouseLeave += delegate
             {
                 _hover = -1;
-                ToolTip = null;
+                _hasMouse = false;
                 InvalidateVisual();
             };
+        }
+
+        private static Pen BuildTipBorder()
+        {
+            Pen pen = new Pen(Ui.BrushFrom("#3A4150"), 1);
+            pen.Freeze();
+            return pen;
         }
 
         public void SetData(List<ChartItem> items, bool hourly, long average)
@@ -196,29 +206,45 @@ namespace TimeTrack
             _hourly = hourly;
             _average = average;
             _hover = -1;
-            ToolTip = null;
+            _hasMouse = false;
             InvalidateVisual();
         }
 
         private void OnChartMouseMove(object sender, MouseEventArgs e)
         {
+            _mouse = e.GetPosition(this);
+            _hasMouse = true;
             if (_items.Count == 0)
             {
-                ToolTip = null;
+                SetHover(-1);
                 return;
             }
-            Point p = e.GetPosition(this);
+
             double right = 64;
             double left = 2;
+            double top = 10;
+            double bottom = 28;
             double plotWidth = ActualWidth - right - left;
-            if (plotWidth <= 0) return;
+            double plotHeight = ActualHeight - top - bottom;
+            if (plotWidth <= 0 || plotHeight <= 0) return;
+            if (_mouse.X < left || _mouse.X > left + plotWidth || _mouse.Y < top || _mouse.Y > top + plotHeight)
+            {
+                SetHover(-1);
+                return;
+            }
+
             double slot = plotWidth / _items.Count;
-            int index = (int)((p.X - left) / slot);
+            int index = (int)((_mouse.X - left) / slot);
             if (index < 0) index = 0;
             if (index >= _items.Count) index = _items.Count - 1;
+            if (_items[index].Seconds <= 0) index = -1;
+            SetHover(index);
+        }
+
+        private void SetHover(int index)
+        {
             if (_hover == index) return;
             _hover = index;
-            ToolTip = _items[index].Tip;
             InvalidateVisual();
         }
 
@@ -333,6 +359,59 @@ namespace TimeTrack
                     dc.DrawText(label, new Point(x, baseY + 8));
                 }
             }
+
+            if (_hasMouse && _hover >= 0 && _hover < _items.Count && _items[_hover].Seconds > 0)
+                DrawHoverCard(dc, width, height, left, top, plotWidth, plotHeight, baseY, max);
+        }
+
+        private void DrawHoverCard(DrawingContext dc, double width, double height,
+            double left, double top, double plotWidth, double plotHeight, double baseY, long max)
+        {
+            ChartItem item = _items[_hover];
+            double slot = plotWidth / _items.Count;
+            double barWidth = Math.Min(16, Math.Max(4, slot * 0.46));
+            double barHeight = (double)item.Seconds / max * plotHeight;
+            if (barHeight < 2) barHeight = 2;
+            double barX = left + _hover * slot + (slot - barWidth) / 2;
+            double barY = baseY - barHeight;
+
+            string title = item.Tip ?? item.Label;
+            string value = string.Empty;
+            int split = title.IndexOf("  ·  ", StringComparison.Ordinal);
+            if (split >= 0)
+            {
+                value = title.Substring(split + 5);
+                title = title.Substring(0, split);
+            }
+            if (string.IsNullOrEmpty(value)) value = Ui.Duration(item.Seconds);
+
+            FormattedText titleText = Format(title, 11.5, Ui.Muted, false);
+            FormattedText valueText = Format(value, 13.5, Ui.Text, true);
+            double cardWidth = Math.Max(152, Math.Max(titleText.Width, valueText.Width) + 28);
+            double cardHeight = 58;
+            double x;
+            double y;
+            if (barY - cardHeight - 10 >= top + 2)
+            {
+                x = barX + barWidth / 2 - cardWidth / 2;
+                y = barY - cardHeight - 10;
+            }
+            else
+            {
+                x = barX + barWidth + 10;
+                if (x + cardWidth > width - 4) x = barX - cardWidth - 10;
+                y = barY + barHeight / 2 - cardHeight / 2;
+            }
+            if (x < 4) x = 4;
+            if (x + cardWidth > width - 4) x = width - cardWidth - 4;
+            if (y < top + 4) y = top + 4;
+            if (y + cardHeight > height - 4) y = height - cardHeight - 4;
+
+            dc.DrawRoundedRectangle(TipShadow, null, new Rect(x + 2, y + 2, cardWidth, cardHeight), 9, 9);
+            dc.DrawRoundedRectangle(TipBg, TipBorder, new Rect(x, y, cardWidth, cardHeight), 9, 9);
+            dc.DrawRoundedRectangle(Ui.Accent, null, new Rect(x + 11, y + 11, 3, cardHeight - 22), 1.5, 1.5);
+            dc.DrawText(titleText, new Point(x + 22, y + 9));
+            dc.DrawText(valueText, new Point(x + 22, y + 28));
         }
 
         private FormattedText Format(string text, double size, Brush brush, bool bold)

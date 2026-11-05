@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Shell;
 using System.Windows.Threading;
 using Drawing = System.Drawing;
@@ -34,6 +35,9 @@ namespace TimeTrack
 
         private string _view = "dashboard";
         private int _rangeMode;
+        private string _renderedView;
+        private int _renderedRangeMode;
+        private DateTime _renderedAnchor;
         private DateTime _anchor = DateTime.Today;
         private DateTime _lastToday = DateTime.Today;
         private bool _showAllApps;
@@ -301,11 +305,52 @@ namespace TimeTrack
         private void Rebuild(bool preserveScroll)
         {
             if (_disposed || _content == null) return;
+            bool pageChanged = _renderedView != null && !string.Equals(_renderedView, _view, StringComparison.Ordinal);
+            bool rangeChanged = _renderedView == "dashboard" && _view == "dashboard" &&
+                (_renderedRangeMode != _rangeMode || _renderedAnchor != _anchor);
+            int direction = 1;
+            if (pageChanged) direction = _view == "dashboard" ? -1 : 1;
+            else if (rangeChanged)
+            {
+                direction = _rangeMode != _renderedRangeMode
+                    ? (_rangeMode > _renderedRangeMode ? 1 : -1)
+                    : (_anchor > _renderedAnchor ? 1 : -1);
+            }
+
             double offset = preserveScroll ? _scroller.VerticalOffset : 0;
             _content.Child = BuildCurrentView();
             _content.UpdateLayout();
             _scroller.ScrollToVerticalOffset(offset);
             _lastVersion = _store.Version;
+
+            _renderedView = _view;
+            _renderedRangeMode = _rangeMode;
+            _renderedAnchor = _anchor;
+            if (pageChanged || rangeChanged) AnimatePage(direction);
+        }
+
+        private void AnimatePage(int direction)
+        {
+            UIElement child = _content == null ? null : _content.Child as UIElement;
+            if (child == null) return;
+
+            TranslateTransform slide = new TranslateTransform();
+            child.RenderTransform = slide;
+            child.Opacity = 0;
+
+            Duration duration = new Duration(TimeSpan.FromMilliseconds(230));
+            CubicEase fadeEase = new CubicEase();
+            fadeEase.EasingMode = EasingMode.EaseOut;
+            DoubleAnimation fade = new DoubleAnimation(0, 1, duration);
+            fade.EasingFunction = fadeEase;
+
+            CubicEase slideEase = new CubicEase();
+            slideEase.EasingMode = EasingMode.EaseOut;
+            DoubleAnimation move = new DoubleAnimation(direction * 26, 0, duration);
+            move.EasingFunction = slideEase;
+
+            child.BeginAnimation(UIElement.OpacityProperty, fade);
+            slide.BeginAnimation(TranslateTransform.XProperty, move);
         }
 
         private void ToggleSettings()
@@ -1481,7 +1526,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.0.0", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.1.0", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
