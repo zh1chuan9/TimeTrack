@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 
@@ -66,9 +67,17 @@ namespace TimeTrack
             return new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
         }
 
+        private static bool _animateColors;
+
         public static void ApplyTheme(bool dark)
         {
+            ApplyTheme(dark, false);
+        }
+
+        public static void ApplyTheme(bool dark, bool animate)
+        {
             IsDark = dark;
+            _animateColors = animate;
             if (dark)
             {
                 SetColor(Bg, "#0B0C0F");
@@ -141,6 +150,7 @@ namespace TimeTrack
                 SetColor(CloseHover, "#C42B1C");
                 SetColor(DangerText, "#B91C1C");
             }
+            _animateColors = false;
             EventHandler handler = ThemeChanged;
             if (handler != null) handler(null, EventArgs.Empty);
         }
@@ -149,7 +159,18 @@ namespace TimeTrack
         {
             SolidColorBrush solid = brush as SolidColorBrush;
             if (solid == null || solid.IsFrozen) return;
-            solid.Color = (Color)ColorConverter.ConvertFromString(hex);
+
+            Color target = (Color)ColorConverter.ConvertFromString(hex);
+            Color from = solid.Color;
+            solid.BeginAnimation(SolidColorBrush.ColorProperty, null);
+            solid.Color = target;
+
+            if (_animateColors && from != target)
+            {
+                ColorAnimation animation = new ColorAnimation(from, target, TimeSpan.FromMilliseconds(220));
+                animation.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                solid.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+            }
         }
 
         private static LinearGradientBrush BuildAccentGradient()

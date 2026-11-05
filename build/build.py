@@ -21,6 +21,7 @@ REFS = [
     "System.Core",
     "System.Drawing",
     "System.Windows.Forms",
+    "System.IO.Compression",
     "System.Web.Extensions",
     "System.Runtime.Serialization",
     "System.Xml",

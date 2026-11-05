@@ -27,3 +27,9 @@ Thumbs.db
 desktop.ini
 # Local release artifacts
 /build/release/
+
+# Local test / packaging
+/dist/
+/uitest/
+/uitest_export.csv
+/tmp_*.py

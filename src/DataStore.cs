@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -21,6 +22,7 @@ namespace TimeTrack
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
         private readonly string _daysDir;
         private readonly string _settingsPath;
+        private readonly string _backupsDir;
         private Settings _settings;
         private DayData _today;
         private DateTime _lastSave = DateTime.MinValue;
@@ -41,6 +43,7 @@ namespace TimeTrack
             RootDir = root;
             _daysDir = Path.Combine(root, "days");
             _settingsPath = Path.Combine(root, "settings.json");
+            _backupsDir = Path.Combine(root, "backups");
             Directory.CreateDirectory(_daysDir);
             Logger.FilePath = Path.Combine(root, "log.txt");
             _json.MaxJsonLength = int.MaxValue;
@@ -50,6 +53,15 @@ namespace TimeTrack
             LoadKnownApps();
             SyncAutoStartPath();
             Logger.Write("TimeTrack started. Data dir: " + root);
+            try
+            {
+                MaybeAutoBackup();
+                RunAutoCleanup(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Startup maintenance", ex);
+            }
         }
 
         public long Version
@@ -90,6 +102,114 @@ namespace TimeTrack
         public bool DarkMode
         {
             get { lock (_gate) return _settings.DarkMode; }
+        }
+
+        public bool AutoBackup
+        {
+            get { lock (_gate) return _settings.AutoBackup; }
+        }
+
+        public bool AutoCleanup
+        {
+            get { lock (_gate) return _settings.AutoCleanup; }
+        }
+
+        public int RetentionDays
+        {
+            get { lock (_gate) return _settings.RetentionDays; }
+        }
+
+        public int CleanupIntervalDays
+        {
+            get { lock (_gate) return _settings.CleanupIntervalDays; }
+        }
+
+        public string BackupDirectory
+        {
+            get { return _backupsDir; }
+        }
+
+        public string LogFilePath
+        {
+            get { return Logger.FilePath; }
+        }
+
+        public string GetCategory(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return CategoryCatalog.Normalize(null);
+            lock (_gate)
+            {
+                string category;
+                if (_settings.Categories != null && _settings.Categories.TryGetValue(key, out category))
+                    return CategoryCatalog.Normalize(category);
+            }
+            return CategoryCatalog.Normalize(null);
+        }
+
+        public void SetCategory(string key, string category)
+        {
+            if (string.IsNullOrEmpty(key)) return;
+            string value = CategoryCatalog.Normalize(category);
+            lock (_gate)
+            {
+                if (_settings.Categories == null)
+                    _settings.Categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                string existing;
+                if (_settings.Categories.TryGetValue(key, out existing) &&
+                    string.Equals(existing, value, StringComparison.Ordinal)) return;
+                _settings.Categories[key] = value;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetAutoBackup(bool enabled)
+        {
+            lock (_gate)
+            {
+                if (_settings.AutoBackup == enabled) return;
+                _settings.AutoBackup = enabled;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetAutoCleanup(bool enabled)
+        {
+            lock (_gate)
+            {
+                if (_settings.AutoCleanup == enabled) return;
+                _settings.AutoCleanup = enabled;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetRetentionDays(int days)
+        {
+            if (days < 7) days = 7;
+            if (days > 3650) days = 3650;
+            lock (_gate)
+            {
+                if (_settings.RetentionDays == days) return;
+                _settings.RetentionDays = days;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
+        }
+
+        public void SetCleanupIntervalDays(int days)
+        {
+            if (days < 1) days = 1;
+            if (days > 365) days = 365;
+            lock (_gate)
+            {
+                if (_settings.CleanupIntervalDays == days) return;
+                _settings.CleanupIntervalDays = days;
+                SaveSettingsLocked();
+                Interlocked.Increment(ref _version);
+            }
         }
 
         public string GetDisplayName(string key, string fallback)
@@ -176,6 +296,20 @@ namespace TimeTrack
                 }
             }
             _settings.CustomNames = displayNames;
+
+            Dictionary<string, string> categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (_settings.Categories != null)
+            {
+                foreach (KeyValuePair<string, string> pair in _settings.Categories)
+                {
+                    if (string.IsNullOrEmpty(pair.Key)) continue;
+                    categories[pair.Key] = CategoryCatalog.Normalize(pair.Value);
+                }
+            }
+            _settings.Categories = categories;
+
+            if (_settings.RetentionDays < 7) _settings.RetentionDays = 90;
+            if (_settings.CleanupIntervalDays < 1) _settings.CleanupIntervalDays = 30;
 
             _excluded.Clear();
             foreach (string key in _settings.ExcludedKeys)
@@ -791,6 +925,253 @@ namespace TimeTrack
             catch (Exception ex)
             {
                 Logger.Error("SaveSettings", ex);
+            }
+        }
+
+        public int RunAutoCleanup(bool force)
+        {
+            lock (_gate)
+            {
+                if (_disposed || !_settings.AutoCleanup) return 0;
+                DateTime now = DateTime.UtcNow;
+                if (!force && _settings.LastCleanupUtc != DateTime.MinValue &&
+                    (now - _settings.LastCleanupUtc).TotalDays < _settings.CleanupIntervalDays)
+                    return 0;
+
+                int removed = 0;
+                DateTime cutoff = DateTime.Today.AddDays(-_settings.RetentionDays);
+                try
+                {
+                    if (Directory.Exists(_daysDir))
+                    {
+                        foreach (string file in Directory.GetFiles(_daysDir, "*.json"))
+                        {
+                            DateTime date;
+                            if (!DateTime.TryParseExact(Path.GetFileNameWithoutExtension(file), "yyyy-MM-dd",
+                                CultureInfo.InvariantCulture, DateTimeStyles.None, out date)) continue;
+                            if (date >= cutoff) continue;
+                            try
+                            {
+                                File.Delete(file);
+                                _cache.Remove(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                                removed++;
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Error("Cleanup " + file, ex);
+                            }
+                        }
+                    }
+                    _settings.LastCleanupUtc = now;
+                    SaveSettingsLocked();
+                    Interlocked.Increment(ref _version);
+                    Logger.Write("Auto cleanup removed " + removed + " day file(s), retention " + _settings.RetentionDays + " days.");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Auto cleanup", ex);
+                }
+                return removed;
+            }
+        }
+
+        public int CleanupNow()
+        {
+            return RunAutoCleanup(true);
+        }
+
+        public string MaybeAutoBackup()
+        {
+            bool enabled;
+            lock (_gate)
+            {
+                if (_disposed) return null;
+                enabled = _settings.AutoBackup;
+            }
+            if (!enabled) return null;
+
+            try
+            {
+                string latest = LatestBackup();
+                if (latest != null && (DateTime.Now - File.GetLastWriteTime(latest)).TotalHours < 23) return null;
+                return CreateBackup();
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Auto backup", ex);
+                return null;
+            }
+        }
+
+        public string CreateBackup()
+        {
+            Flush();
+            lock (_gate)
+            {
+                Directory.CreateDirectory(_backupsDir);
+                string name = "TimeTrack-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff", CultureInfo.InvariantCulture) + ".zip";
+                string path = Path.Combine(_backupsDir, name);
+                using (FileStream stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (ZipArchive archive = new ZipArchive(stream, ZipArchiveMode.Create))
+                {
+                    AddBackupEntry(archive, "settings.json", _settingsPath);
+                    if (Directory.Exists(_daysDir))
+                    {
+                        foreach (string file in Directory.GetFiles(_daysDir, "*.json"))
+                            AddBackupEntry(archive, "days/" + Path.GetFileName(file), file);
+                    }
+                }
+                TrimBackupsLocked();
+                Logger.Write("Backup created: " + path);
+                return path;
+            }
+        }
+
+        private static void AddBackupEntry(ZipArchive archive, string entryName, string path)
+        {
+            if (!File.Exists(path)) return;
+            ZipArchiveEntry entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+            using (Stream output = entry.Open())
+            using (FileStream input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                input.CopyTo(output);
+            }
+        }
+
+        private string LatestBackup()
+        {
+            try
+            {
+                if (!Directory.Exists(_backupsDir)) return null;
+                string latest = null;
+                DateTime latestTime = DateTime.MinValue;
+                foreach (string file in Directory.GetFiles(_backupsDir, "TimeTrack-*.zip"))
+                {
+                    DateTime time = File.GetLastWriteTime(file);
+                    if (time > latestTime)
+                    {
+                        latestTime = time;
+                        latest = file;
+                    }
+                }
+                return latest;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private void TrimBackupsLocked()
+        {
+            try
+            {
+                if (!Directory.Exists(_backupsDir)) return;
+                string[] files = Directory.GetFiles(_backupsDir, "TimeTrack-*.zip");
+                if (files.Length <= 7) return;
+                Array.Sort(files, delegate(string a, string b)
+                {
+                    return File.GetLastWriteTime(a).CompareTo(File.GetLastWriteTime(b));
+                });
+                for (int i = 0; i < files.Length - 7; i++)
+                {
+                    try { File.Delete(files[i]); } catch { }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("TrimBackups", ex);
+            }
+        }
+
+        public string ExportCsv(string path)
+        {
+            if (string.IsNullOrEmpty(path)) throw new ArgumentException("导出路径不能为空", "path");
+            List<string> lines = new List<string>();
+            lines.Add("日期,应用,总秒数,总时长,前台秒数,后台秒数,电脑活跃秒数");
+            lock (_gate)
+            {
+                if (Directory.Exists(_daysDir))
+                {
+                    string[] files = Directory.GetFiles(_daysDir, "*.json");
+                    Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+                    foreach (string file in files)
+                    {
+                        DateTime date;
+                        if (!DateTime.TryParseExact(Path.GetFileNameWithoutExtension(file), "yyyy-MM-dd",
+                            CultureInfo.InvariantCulture, DateTimeStyles.None, out date)) continue;
+                        DayData day = GetDayLocked(date);
+                        List<AppUsage> apps = new List<AppUsage>(day.Apps.Values);
+                        apps.Sort(delegate(AppUsage a, AppUsage b)
+                        {
+                            return b.Total.CompareTo(a.Total);
+                        });
+                        foreach (AppUsage app in apps)
+                        {
+                            if (app == null) continue;
+                            lines.Add(CsvEscape(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)) + "," +
+                                CsvEscape(app.Name) + "," +
+                                app.Total.ToString(CultureInfo.InvariantCulture) + "," +
+                                CsvEscape(FormatCsvDuration(app.Total)) + "," +
+                                app.ForegroundTotal.ToString(CultureInfo.InvariantCulture) + "," +
+                                app.BackgroundTotal.ToString(CultureInfo.InvariantCulture) + "," +
+                                day.ActiveSeconds.ToString(CultureInfo.InvariantCulture));
+                        }
+                    }
+                }
+            }
+            File.WriteAllLines(path, lines.ToArray(), new UTF8Encoding(true));
+            Logger.Write("CSV exported: " + path);
+            return path;
+        }
+
+        private static string CsvEscape(string value)
+        {
+            if (value == null) return "\"\"";
+            if (value.IndexOfAny(new char[] { ',', '"', '\r', '\n' }) < 0) return value;
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        private static string FormatCsvDuration(long seconds)
+        {
+            if (seconds < 0) seconds = 0;
+            long hours = seconds / 3600;
+            long minutes = (seconds % 3600) / 60;
+            long secs = seconds % 60;
+            return string.Format(CultureInfo.InvariantCulture, "{0:00}:{1:00}:{2:00}", hours, minutes, secs);
+        }
+
+        public static void OpenBackupFolder(string path)
+        {
+            try
+            {
+                if (!Directory.Exists(path)) Directory.CreateDirectory(path);
+                ProcessStartInfo info = new ProcessStartInfo();
+                info.FileName = "explorer.exe";
+                info.Arguments = "\"" + path + "\"";
+                info.UseShellExecute = true;
+                Process.Start(info);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("OpenBackupFolder", ex);
+            }
+        }
+
+        public static void OpenLogFile(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return;
+                ProcessStartInfo info = new ProcessStartInfo();
+                info.FileName = "notepad.exe";
+                info.Arguments = "\"" + path + "\"";
+                info.UseShellExecute = true;
+                Process.Start(info);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("OpenLogFile", ex);
             }
         }
 

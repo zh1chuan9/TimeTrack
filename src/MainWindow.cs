@@ -52,6 +52,7 @@ namespace TimeTrack
         private bool _exiting;
         private bool _disposed;
         private bool _trayHintShown;
+        private SessionLog _session;
         private readonly bool _startHidden;
         private bool? _statusPaused;
         private int _trimTicks;
@@ -66,7 +67,13 @@ namespace TimeTrack
         {
             _startHidden = startHidden;
             _store = new DataStore();
-            Ui.ApplyTheme(_store.DarkMode);
+            Ui.ApplyTheme(_store.DarkMode, false);
+            _session = new SessionLog(_store.DataDirectory);
+            _session.Start();
+            AppDomain.CurrentDomain.ProcessExit += delegate
+            {
+                if (_session != null) _session.MarkCleanExit("process exit");
+            };
 
             Title = "时间统计";
             Width = Math.Min(1180, Math.Max(940, SystemParameters.WorkArea.Width - 160));
@@ -119,6 +126,7 @@ namespace TimeTrack
                 Application.Current.SessionEnding += delegate(object sender, SessionEndingCancelEventArgs e)
                 {
                     _exiting = true;
+                    if (_session != null) _session.MarkCleanExit("Windows session ending");
                 };
             }
 
@@ -442,6 +450,7 @@ namespace TimeTrack
 
             RangeData data = _store.BuildRange(start, dataEnd, null);
             page.Children.Add(BuildSummaryCard(data));
+            if (_rangeMode == 1) page.Children.Add(BuildWeeklyCategoryCard(data));
             page.Children.Add(BuildRankingCard(data));
             page.Children.Add(BuildFooter());
             return page;
@@ -607,22 +616,21 @@ namespace TimeTrack
             long splitKnown = data.ForegroundTotal + data.BackgroundTotal;
             if (splitKnown > 0 || data.UnclassifiedTotal > 0)
             {
-                StackPanel split = new StackPanel();
-                split.Orientation = Orientation.Horizontal;
+                WrapPanel split = new WrapPanel();
                 split.Margin = new Thickness(0, 7, 0, 0);
                 if (splitKnown > 0)
                 {
                     split.Children.Add(SplitLegend("应用前台总时长", Ui.Duration(data.ForegroundTotal), Ui.Accent));
-                    split.Children.Add(Ui.TextBlock("     ", 10.5, Ui.Dim));
                     split.Children.Add(SplitLegend("应用后台总时长", Ui.Duration(data.BackgroundTotal), Ui.Green));
                 }
                 if (data.UnclassifiedTotal > 0)
                 {
-                    if (splitKnown > 0) split.Children.Add(Ui.TextBlock("  ·  ", 10, Ui.Dim));
                     string legacy = splitKnown > 0
                         ? "应用历史总时长 " + Ui.Duration(data.UnclassifiedTotal)
                         : "应用历史总时长（未区分前后台） " + Ui.Duration(data.UnclassifiedTotal);
-                    split.Children.Add(Ui.TextBlock(legacy, 10, Ui.Dim));
+                    TextBlock legacyBlock = Ui.TextBlock(legacy, 10, Ui.Dim);
+                    legacyBlock.Margin = new Thickness(0, 0, 0, 3);
+                    split.Children.Add(legacyBlock);
                 }
                 left.Children.Add(split);
             }
@@ -688,6 +696,193 @@ namespace TimeTrack
             Border card = Ui.CardSurface(inner, 24);
             card.CornerRadius = new CornerRadius(20);
             return card;
+        }
+
+        private UIElement BuildWeeklyCategoryCard(RangeData data)
+        {
+            DateTime previousEnd = data.Start.Date.AddDays(-1);
+            DateTime previousStart = previousEnd.AddDays(-6);
+            RangeData previous = _store.BuildRange(previousStart, previousEnd, null);
+
+            Dictionary<string, long> current = SumCategories(data);
+            Dictionary<string, long> before = SumCategories(previous);
+            long currentTotal = 0;
+            foreach (long value in current.Values) currentTotal += value;
+
+            StackPanel inner = new StackPanel();
+            Grid head = new Grid();
+            head.ColumnDefinitions.Add(new ColumnDefinition());
+            head.ColumnDefinitions.Add(new ColumnDefinition());
+            head.ColumnDefinitions[1].Width = GridLength.Auto;
+            StackPanel titleStack = new StackPanel();
+            titleStack.Children.Add(Ui.TextBlock("分类周报", 13, Ui.TextSoft, FontWeights.SemiBold));
+            TextBlock hint = Ui.TextBlock("近 7 天应用时长 · 对比前 7 天", 10.5, Ui.Dim);
+            hint.Margin = new Thickness(0, 3, 0, 0);
+            titleStack.Children.Add(hint);
+            head.Children.Add(titleStack);
+            TextBlock totalLabel = Ui.TextBlock("合计 " + Ui.Duration(currentTotal), 10.5, Ui.Muted);
+            totalLabel.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(totalLabel, 1);
+            head.Children.Add(totalLabel);
+            inner.Children.Add(head);
+
+            if (currentTotal <= 0)
+            {
+                TextBlock empty = Ui.TextBlock("近 7 天还没有应用记录", 11, Ui.Dim);
+                empty.Margin = new Thickness(0, 18, 0, 4);
+                inner.Children.Add(empty);
+            }
+            else
+            {
+                List<string> categories = new List<string>();
+                foreach (string category in CategoryCatalog.Names)
+                {
+                    long value;
+                    long oldValue;
+                    current.TryGetValue(category, out value);
+                    before.TryGetValue(category, out oldValue);
+                    if (value > 0 || oldValue > 0) categories.Add(category);
+                }
+                categories.Sort(delegate(string a, string b)
+                {
+                    long va;
+                    long vb;
+                    current.TryGetValue(a, out va);
+                    current.TryGetValue(b, out vb);
+                    return vb.CompareTo(va);
+                });
+
+                foreach (string category in categories)
+                {
+                    long value;
+                    long oldValue;
+                    current.TryGetValue(category, out value);
+                    before.TryGetValue(category, out oldValue);
+                    AddWeeklyCategoryRow(inner, category, value, oldValue, currentTotal);
+                }
+                TextBlock note = Ui.TextBlock("分类按应用时长统计，可重叠；电脑使用时间以顶部为准", 10, Ui.Dim);
+                note.Margin = new Thickness(0, 12, 0, 0);
+                inner.Children.Add(note);
+            }
+
+            Border card = Ui.CardSurface(inner, 17);
+            card.CornerRadius = new CornerRadius(16);
+            card.Margin = new Thickness(0, 0, 0, 16);
+            return card;
+        }
+
+        private void AddWeeklyCategoryRow(StackPanel inner, string category, long value, long oldValue, long currentTotal)
+        {
+            Grid row = new Grid();
+            row.Margin = new Thickness(0, 9, 0, 0);
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions[0].Width = new GridLength(16);
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions[1].Width = new GridLength(62);
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions[3].Width = new GridLength(86);
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions[4].Width = new GridLength(44);
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions[5].Width = new GridLength(68);
+
+            System.Windows.Shapes.Ellipse dot = Ui.Dot(CategoryBrush(category), 6);
+            dot.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(dot, 0);
+            row.Children.Add(dot);
+
+            TextBlock name = Ui.TextBlock(category, 11.5, Ui.TextSoft, FontWeights.Medium);
+            name.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(name, 1);
+            row.Children.Add(name);
+
+            double percent = currentTotal > 0 ? Math.Max(1.0, 100.0 * value / currentTotal) : 0;
+            Border track = new Border();
+            track.Height = 5;
+            track.Background = Ui.Track;
+            track.CornerRadius = new CornerRadius(3);
+            track.VerticalAlignment = VerticalAlignment.Center;
+            track.Margin = new Thickness(4, 0, 10, 0);
+            Grid fill = new Grid();
+            fill.ColumnDefinitions.Add(new ColumnDefinition());
+            fill.ColumnDefinitions[0].Width = new GridLength(percent, GridUnitType.Star);
+            fill.ColumnDefinitions.Add(new ColumnDefinition());
+            fill.ColumnDefinitions[1].Width = new GridLength(100 - percent, GridUnitType.Star);
+            Border fillBar = new Border();
+            fillBar.Background = CategoryBrush(category);
+            fillBar.CornerRadius = new CornerRadius(3);
+            fill.Children.Add(fillBar);
+            track.Child = fill;
+            Grid.SetColumn(track, 2);
+            row.Children.Add(track);
+
+            TextBlock duration = Ui.TextBlock(Ui.Duration(value), 11, Ui.TextSoft, FontWeights.SemiBold);
+            duration.TextAlignment = TextAlignment.Right;
+            duration.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(duration, 3);
+            row.Children.Add(duration);
+
+            TextBlock share = Ui.TextBlock(percent.ToString("0", CultureInfo.InvariantCulture) + "%", 10.5, Ui.Dim);
+            share.TextAlignment = TextAlignment.Right;
+            share.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(share, 4);
+            row.Children.Add(share);
+
+            long delta = value - oldValue;
+            string deltaText;
+            Brush deltaBrush;
+            if (oldValue <= 0 && value > 0)
+            {
+                deltaText = "新增";
+                deltaBrush = Ui.Green;
+            }
+            else if (delta > 0)
+            {
+                deltaText = "+" + Ui.Duration(delta);
+                deltaBrush = Ui.Green;
+            }
+            else if (delta < 0)
+            {
+                deltaText = "-" + Ui.Duration(-delta);
+                deltaBrush = Ui.Red;
+            }
+            else
+            {
+                deltaText = "持平";
+                deltaBrush = Ui.Dim;
+            }
+            TextBlock change = Ui.TextBlock(deltaText, 10, deltaBrush);
+            change.TextAlignment = TextAlignment.Right;
+            change.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(change, 5);
+            row.Children.Add(change);
+
+            inner.Children.Add(row);
+        }
+
+        private Dictionary<string, long> SumCategories(RangeData data)
+        {
+            Dictionary<string, long> totals = new Dictionary<string, long>(StringComparer.Ordinal);
+            foreach (string category in CategoryCatalog.Names) totals[category] = 0;
+            foreach (AppAgg app in data.Apps)
+            {
+                string category = _store.GetCategory(app.Key);
+                long value;
+                totals.TryGetValue(category, out value);
+                totals[category] = value + app.Seconds;
+            }
+            return totals;
+        }
+
+        private static Brush CategoryBrush(string category)
+        {
+            if (string.Equals(category, "工作", StringComparison.Ordinal)) return Ui.Accent;
+            if (string.Equals(category, "学习", StringComparison.Ordinal)) return Ui.Green;
+            if (string.Equals(category, "娱乐", StringComparison.Ordinal)) return Ui.Amber;
+            if (string.Equals(category, "社交", StringComparison.Ordinal)) return Ui.Red;
+            if (string.Equals(category, "工具", StringComparison.Ordinal)) return Ui.AccentLight;
+            return Ui.Dim;
         }
 
         private List<ChartItem> BuildChartItems(RangeData data, out bool hourly, out long average)
@@ -1190,6 +1385,7 @@ namespace TimeTrack
             StackPanel panel = new StackPanel();
             panel.Orientation = Orientation.Horizontal;
             panel.VerticalAlignment = VerticalAlignment.Center;
+            panel.Margin = new Thickness(0, 0, 16, 3);
             System.Windows.Shapes.Ellipse dot = Ui.Dot(color, 5);
             dot.Margin = new Thickness(0, 0, 6, 0);
             panel.Children.Add(dot);
@@ -1341,7 +1537,7 @@ namespace TimeTrack
             header.ColumnDefinitions[1].Width = GridLength.Auto;
             StackPanel titleStack = new StackPanel();
             titleStack.Children.Add(Ui.TextBlock("应用列表", 13, Ui.TextSoft, FontWeights.SemiBold));
-            TextBlock hint = Ui.TextBlock("关闭开关不再统计；点击「改名」自定义显示名称", 10.5, Ui.Dim);
+            TextBlock hint = Ui.TextBlock("关闭开关不再统计；点击分类标签切换分类，点击「改名」自定义显示名称", 10.5, Ui.Dim);
             hint.Margin = new Thickness(0, 3, 0, 0);
             titleStack.Children.Add(hint);
             header.Children.Add(titleStack);
@@ -1381,8 +1577,10 @@ namespace TimeTrack
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions.Add(new ColumnDefinition());
+                grid.ColumnDefinitions.Add(new ColumnDefinition());
                 grid.ColumnDefinitions[2].Width = GridLength.Auto;
                 grid.ColumnDefinitions[3].Width = GridLength.Auto;
+                grid.ColumnDefinitions[4].Width = GridLength.Auto;
 
                 Border icon = Ui.AppIcon(app.Key, DisplayName(app), app.Path, 30);
                 icon.VerticalAlignment = VerticalAlignment.Center;
@@ -1401,13 +1599,25 @@ namespace TimeTrack
                 Grid.SetColumn(middle, 1);
                 grid.Children.Add(middle);
 
+                string category = _store.GetCategory(app.Key);
+                Border categoryChip = PillButton(category, "", Ui.Muted, false, delegate
+                {
+                    _store.SetCategory(app.Key, CategoryCatalog.Next(category));
+                    Rebuild(true);
+                });
+                categoryChip.VerticalAlignment = VerticalAlignment.Center;
+                categoryChip.Margin = new Thickness(2, 0, 7, 0);
+                categoryChip.ToolTip = "点击切换应用分类";
+                Grid.SetColumn(categoryChip, 2);
+                grid.Children.Add(categoryChip);
+
                 TextButton rename = new TextButton("改名", Ui.Accent);
                 rename.VerticalAlignment = VerticalAlignment.Center;
-                rename.Margin = new Thickness(4, 0, 8, 0);
+                rename.Margin = new Thickness(0, 0, 8, 0);
                 rename.ToolTip = "自定义这个应用显示的名称";
                 AppMeta renameApp = app;
                 rename.Click += delegate { RenameApp(renameApp); };
-                Grid.SetColumn(rename, 2);
+                Grid.SetColumn(rename, 3);
                 grid.Children.Add(rename);
 
                 Switch monitor = new Switch();
@@ -1420,7 +1630,7 @@ namespace TimeTrack
                     usage.Text = enabled ? UsageSummary(total) : "已忽略 · 不计入统计";
                     UpdateExcludedLabel(excludedLabel, apps);
                 };
-                Grid.SetColumn(monitor, 3);
+                Grid.SetColumn(monitor, 4);
                 grid.Children.Add(monitor);
 
                 row.Child = grid;
@@ -1436,7 +1646,7 @@ namespace TimeTrack
 
                 AppFilterEntry entry = new AppFilterEntry();
                 entry.Container = container;
-                entry.Search = (DisplayName(app) + " " + SafeName(app) + " " + (app.Path == null ? string.Empty : app.Path) + " " + app.Key).ToLowerInvariant();
+                entry.Search = (DisplayName(app) + " " + SafeName(app) + " " + (app.Path == null ? string.Empty : app.Path) + " " + app.Key + " " + category).ToLowerInvariant();
                 entries.Add(entry);
             }
 
@@ -1576,6 +1786,142 @@ namespace TimeTrack
         {
             StackPanel rows = new StackPanel();
 
+            Switch backupSwitch = new Switch();
+            backupSwitch.IsOn = _store.AutoBackup;
+            backupSwitch.Toggled += delegate { _store.SetAutoBackup(backupSwitch.IsOn); };
+            AddSettingRow(rows, SettingRow("自动备份", "每天首次启动时把设置与记录打包到 backups 文件夹，自动保留最近 7 份", backupSwitch), true);
+
+            Switch cleanupSwitch = new Switch();
+            cleanupSwitch.IsOn = _store.AutoCleanup;
+            AddSettingRow(rows, SettingRow("自动清理旧记录", "按保留时长删除较早的每日记录文件；建议保持自动备份开启", cleanupSwitch), true);
+
+            int[] retentionValues = new int[] { 30, 90, 180, 365 };
+            string[] retentionLabels = new string[] { "30 天", "90 天", "180 天", "365 天" };
+            int retentionIndex = 0;
+            int retentionDistance = int.MaxValue;
+            for (int i = 0; i < retentionValues.Length; i++)
+            {
+                int difference = Math.Abs(_store.RetentionDays - retentionValues[i]);
+                if (difference < retentionDistance)
+                {
+                    retentionDistance = difference;
+                    retentionIndex = i;
+                }
+            }
+            SegmentBar retentionBar = new SegmentBar(retentionLabels, retentionIndex);
+            retentionBar.SelectionChanged += delegate { _store.SetRetentionDays(retentionValues[retentionBar.SelectedIndex]); };
+            AddSettingRow(rows, SettingRow("记录保留时长", "超过这个天数的每日记录会在自动清理时删除", retentionBar), true);
+
+            int[] intervalValues = new int[] { 7, 30, 90, 180 };
+            string[] intervalLabels = new string[] { "7 天", "30 天", "90 天", "180 天" };
+            int intervalIndex = 0;
+            int intervalDistance = int.MaxValue;
+            for (int i = 0; i < intervalValues.Length; i++)
+            {
+                int difference = Math.Abs(_store.CleanupIntervalDays - intervalValues[i]);
+                if (difference < intervalDistance)
+                {
+                    intervalDistance = difference;
+                    intervalIndex = i;
+                }
+            }
+            SegmentBar intervalBar = new SegmentBar(intervalLabels, intervalIndex);
+            intervalBar.SelectionChanged += delegate { _store.SetCleanupIntervalDays(intervalValues[intervalBar.SelectedIndex]); };
+            AddSettingRow(rows, SettingRow("清理检查频率", "启动时最多按这个间隔检查一次，不会频繁删除", intervalBar), false);
+            retentionBar.IsEnabled = cleanupSwitch.IsOn;
+            intervalBar.IsEnabled = cleanupSwitch.IsOn;
+            cleanupSwitch.Toggled += delegate
+            {
+                _store.SetAutoCleanup(cleanupSwitch.IsOn);
+                retentionBar.IsEnabled = cleanupSwitch.IsOn;
+                intervalBar.IsEnabled = cleanupSwitch.IsOn;
+            };
+
+            Grid tools = new Grid();
+            for (int i = 0; i < 5; i++) tools.ColumnDefinitions.Add(new ColumnDefinition());
+            Border exportButton = PillButton("导出 CSV", "\uE896", Ui.TextSoft, false, delegate
+            {
+                Microsoft.Win32.SaveFileDialog dialog = new Microsoft.Win32.SaveFileDialog();
+                dialog.Title = "导出使用记录";
+                dialog.Filter = "CSV 文件 (*.csv)|*.csv";
+                dialog.FileName = "TimeTrack-" + DateTime.Now.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + ".csv";
+                if (dialog.ShowDialog(this) != true) return;
+                try
+                {
+                    _store.ExportCsv(dialog.FileName);
+                    MessageBox.Show(this, "已导出到：\n" + dialog.FileName, "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("ExportCsv UI", ex);
+                    MessageBox.Show(this, "导出失败：" + ex.Message, "时间统计", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            });
+            exportButton.Margin = new Thickness(0, 2, 7, 2);
+            Grid.SetColumn(exportButton, 0);
+            tools.Children.Add(exportButton);
+
+            Border backupButton = PillButton("立即备份", "\uE74E", Ui.TextSoft, false, delegate
+            {
+                try
+                {
+                    string path = _store.CreateBackup();
+                    MessageBox.Show(this, "已创建备份：\n" + path, "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("CreateBackup UI", ex);
+                    MessageBox.Show(this, "备份失败：" + ex.Message, "时间统计", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            });
+            backupButton.Margin = new Thickness(0, 2, 7, 2);
+            Grid.SetColumn(backupButton, 1);
+            tools.Children.Add(backupButton);
+
+            Border cleanupButton = PillButton("立即清理", "\uE74D", Ui.TextSoft, false, delegate
+            {
+                ConfirmDialog dialog = new ConfirmDialog("清理旧记录",
+                    "这会删除超过 " + _store.RetentionDays + " 天的每日记录，且无法撤销。建议先备份。", "清理", true);
+                dialog.Owner = this;
+                if (dialog.ShowDialog() != true) return;
+                int removed = _store.CleanupNow();
+                MessageBox.Show(this, "已删除 " + removed + " 个旧记录文件。", "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+            });
+            cleanupButton.Margin = new Thickness(0, 2, 7, 2);
+            Grid.SetColumn(cleanupButton, 2);
+            tools.Children.Add(cleanupButton);
+
+            Border logButton = PillButton("查看日志", "\uE7BA", Ui.TextSoft, false, delegate
+            {
+                if (!File.Exists(_store.LogFilePath))
+                {
+                    MessageBox.Show(this, "还没有日志文件。", "时间统计", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+                DataStore.OpenLogFile(_store.LogFilePath);
+            });
+            logButton.Margin = new Thickness(0, 2, 7, 2);
+            Grid.SetColumn(logButton, 3);
+            tools.Children.Add(logButton);
+
+            Border backupFolderButton = PillButton("备份目录", "\uE8B7", Ui.TextSoft, false, delegate
+            {
+                DataStore.OpenBackupFolder(_store.BackupDirectory);
+            });
+            backupFolderButton.Margin = new Thickness(0, 2, 0, 2);
+            Grid.SetColumn(backupFolderButton, 4);
+            tools.Children.Add(backupFolderButton);
+
+            StackPanel toolSection = new StackPanel();
+            toolSection.Margin = new Thickness(18, 13, 18, 13);
+            toolSection.Children.Add(Ui.TextBlock("数据工具", 12.5, Ui.Text, FontWeights.Medium));
+            TextBlock toolDesc = Ui.TextBlock("导出表格、手动备份、清理旧记录或检查运行日志", 10.5, Ui.Dim);
+            toolDesc.Margin = new Thickness(0, 4, 0, 8);
+            toolSection.Children.Add(toolDesc);
+            toolSection.Children.Add(tools);
+            rows.Children.Add(toolSection);
+            rows.Children.Add(Ui.Separator());
+
             Border openButton = PillButton("打开文件夹", "\uE8B7", Ui.TextSoft, false, delegate
             {
                 DataStore.OpenDataFolder();
@@ -1601,7 +1947,7 @@ namespace TimeTrack
 
             StackPanel about = new StackPanel();
             about.Margin = new Thickness(18, 15, 18, 18);
-            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.4.1", 12, Ui.TextSoft, FontWeights.Medium);
+            TextBlock aboutTitle = Ui.TextBlock("时间统计 1.5.0", 12, Ui.TextSoft, FontWeights.Medium);
             about.Children.Add(aboutTitle);
             TextBlock aboutText = Ui.TextBlock("只在本地记录，不联网、不上传任何数据。", 10.5, Ui.Dim);
             aboutText.Margin = new Thickness(0, 4, 0, 0);
@@ -1828,10 +2174,25 @@ namespace TimeTrack
 
         private void ApplyTheme(bool dark)
         {
-            Ui.ApplyTheme(dark);
+            bool animate = _store != null && !_store.Lightweight && IsVisible;
+            Ui.ApplyTheme(dark, animate);
             WindowFx.SetDark(this, dark);
             ApplyTrayTheme();
-            if (_glow != null) _glow.Opacity = dark ? 1.0 : 0.5;
+            if (_glow != null)
+            {
+                double target = dark ? 1.0 : 0.5;
+                if (animate)
+                {
+                    DoubleAnimation fade = new DoubleAnimation(target, TimeSpan.FromMilliseconds(220));
+                    fade.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                    _glow.BeginAnimation(OpacityProperty, fade);
+                }
+                else
+                {
+                    _glow.BeginAnimation(OpacityProperty, null);
+                    _glow.Opacity = target;
+                }
+            }
         }
 
         private void ApplyTrayTheme()
@@ -1976,6 +2337,7 @@ namespace TimeTrack
                 exitItem.Click += delegate
                 {
                     _exiting = true;
+                    if (_session != null) _session.MarkCleanExit("tray exit");
                     Close();
                 };
                 _trayMenu.Items.Add(exitItem);
@@ -2080,6 +2442,12 @@ namespace TimeTrack
             {
                 _tracker.Dispose();
                 _tracker = null;
+            }
+            if (_session != null)
+            {
+                _session.MarkCleanExit("window closed");
+                _session.Dispose();
+                _session = null;
             }
             if (_store != null)
             {

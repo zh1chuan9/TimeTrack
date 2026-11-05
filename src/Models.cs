@@ -98,19 +98,61 @@ namespace TimeTrack
         public bool Lightweight { get; set; }
         public bool DarkMode { get; set; }
         public Dictionary<string, string> CustomNames { get; set; }
+        public Dictionary<string, string> Categories { get; set; }
         public int IdleSeconds { get; set; }
+        public bool AutoBackup { get; set; }
+        public bool AutoCleanup { get; set; }
+        public int RetentionDays { get; set; }
+        public int CleanupIntervalDays { get; set; }
+        public DateTime LastCleanupUtc { get; set; }
 
         public Settings()
         {
             ExcludedKeys = new List<string>();
             KnownApps = new List<AppMeta>();
             CustomNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            Categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             IdleSeconds = 120;
             AutoStart = false;
             Paused = false;
             TrackBackground = true;
             Lightweight = false;
             DarkMode = true;
+            AutoBackup = true;
+            AutoCleanup = false;
+            RetentionDays = 90;
+            CleanupIntervalDays = 30;
+            LastCleanupUtc = DateTime.MinValue;
+        }
+    }
+
+    public static class CategoryCatalog
+    {
+        public static readonly string[] Names = new string[]
+        {
+            "工作", "学习", "娱乐", "社交", "工具", "其他"
+        };
+
+        public static string Normalize(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "其他";
+            string text = value.Trim();
+            for (int i = 0; i < Names.Length; i++)
+            {
+                if (string.Equals(Names[i], text, StringComparison.Ordinal)) return Names[i];
+            }
+            return "其他";
+        }
+
+        public static string Next(string value)
+        {
+            string current = Normalize(value);
+            for (int i = 0; i < Names.Length; i++)
+            {
+                if (string.Equals(Names[i], current, StringComparison.Ordinal))
+                    return Names[(i + 1) % Names.Length];
+            }
+            return Names[0];
         }
     }
 
