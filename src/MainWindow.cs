@@ -31,6 +31,8 @@ namespace TimeTrack
         private DispatcherTimer _refreshTimer;
         private ScrollViewer _scroller;
         private PageScrollBar _pageScroll;
+        private Popup _categoryPopup;
+        private Border _categoryChipOpen;
         private Border _content;
         private Border _statusPill;
         private Border _statusDot;
@@ -1158,7 +1160,7 @@ namespace TimeTrack
             dot.Margin = new Thickness(0, 0, 5, 0);
             content.Children.Add(dot);
             content.Children.Add(Ui.TextBlock(category, 10.5, brush, FontWeights.Medium));
-            TextBlock chevron = Ui.Glyph("\uE70D", 8, Ui.Dim);
+            TextBlock chevron = Ui.TextBlock("\u25BC", 7.5, Ui.Dim);
             chevron.Margin = new Thickness(5, 1, 0, 0);
             content.Children.Add(chevron);
             chip.Child = content;
@@ -1167,13 +1169,33 @@ namespace TimeTrack
             chip.MouseLeave += delegate { chip.Background = Ui.Card2; };
             chip.MouseLeftButtonUp += delegate
             {
-                Dispatcher.BeginInvoke(DispatcherPriority.Input,
-                    new Action(delegate { ShowCategoryPicker(chip, appKey, changed); }));
+                // Second click on the same chip closes its open picker instead of
+                // recreating it; clicking another chip closes the old one first.
+                if (_categoryPopup != null && _categoryPopup.IsOpen && _categoryChipOpen == chip)
+                {
+                    _categoryPopup.IsOpen = false;
+                    return;
+                }
+                if (_categoryPopup != null) _categoryPopup.IsOpen = false;
+
+                Popup popup = ShowCategoryPicker(chip, appKey, changed);
+                _categoryPopup = popup;
+                _categoryChipOpen = chip;
+                chevron.Text = "\u25B2";
+                popup.Closed += delegate
+                {
+                    chevron.Text = "\u25BC";
+                    if (_categoryPopup == popup)
+                    {
+                        _categoryPopup = null;
+                        _categoryChipOpen = null;
+                    }
+                };
             };
             return chip;
         }
 
-        private void ShowCategoryPicker(Border chip, string appKey, Action changed)
+        private Popup ShowCategoryPicker(Border chip, string appKey, Action changed)
         {
             Popup popup = new Popup();
             popup.PlacementTarget = chip;
@@ -1217,11 +1239,42 @@ namespace TimeTrack
                 expand.BeginAnimation(ScaleTransform.ScaleYProperty, scaleY);
             };
             ShowCategoryList(content, panel, popup, appKey, changed);
-            popup.IsOpen = true;
-            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(delegate
+
+            // StaysOpen=true keeps the popup from auto-closing before the chip's
+            // MouseLeftButtonUp can toggle it. Clicks elsewhere are handled here.
+            MouseButtonEventHandler outside = delegate(object sender, MouseButtonEventArgs e)
             {
-                if (popup.IsOpen) popup.StaysOpen = false;
-            }));
+                DependencyObject source = e.OriginalSource as DependencyObject;
+                if (!popup.IsOpen) return;
+                if (source != null && (IsInside(source, chip) || IsInside(source, panel))) return;
+                popup.IsOpen = false;
+            };
+            EventHandler deactivated = delegate { popup.IsOpen = false; };
+            this.PreviewMouseDown += outside;
+            this.Deactivated += deactivated;
+            popup.Closed += delegate
+            {
+                this.PreviewMouseDown -= outside;
+                this.Deactivated -= deactivated;
+            };
+
+            popup.IsOpen = true;
+            return popup;
+        }
+
+        private static bool IsInside(DependencyObject source, DependencyObject ancestor)
+        {
+            while (source != null)
+            {
+                if (source == ancestor) return true;
+                DependencyObject parent = null;
+                if (source is Visual || source is System.Windows.Media.Media3D.Visual3D)
+                    parent = VisualTreeHelper.GetParent(source);
+                else
+                    parent = LogicalTreeHelper.GetParent(source);
+                source = parent;
+            }
+            return false;
         }
 
         private void ShowCategoryList(StackPanel content, Border panel, Popup popup, string appKey, Action changed)
@@ -1257,7 +1310,7 @@ namespace TimeTrack
                 row.Children.Add(label);
                 if (string.Equals(captured, current, StringComparison.Ordinal))
                 {
-                    TextBlock check = Ui.TextBlock("\uE73E", 11, Ui.Accent);
+                    TextBlock check = Ui.TextBlock("\u2713", 11, Ui.Accent);
                     check.VerticalAlignment = VerticalAlignment.Center;
                     Grid.SetColumn(check, 2);
                     row.Children.Add(check);
