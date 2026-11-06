@@ -5,16 +5,27 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 
 namespace TimeTrack
 {
     public class Switch : FrameworkElement
     {
+        public static readonly DependencyProperty KnobProperty = DependencyProperty.Register(
+            "Knob", typeof(double), typeof(Switch),
+            new FrameworkPropertyMetadata(0.0, FrameworkPropertyMetadataOptions.AffectsRender));
+
         private bool _isOn;
         private bool _hover;
         private readonly EventHandler _themeHandler;
 
         public event EventHandler Toggled;
+
+        public double Knob
+        {
+            get { return (double)GetValue(KnobProperty); }
+            set { SetValue(KnobProperty, value); }
+        }
 
         public Switch()
         {
@@ -41,6 +52,18 @@ namespace TimeTrack
             {
                 if (_isOn == value) return;
                 _isOn = value;
+                double target = value ? 1.0 : 0.0;
+                if (IsLoaded)
+                {
+                    DoubleAnimation animation = new DoubleAnimation(target, TimeSpan.FromMilliseconds(160));
+                    animation.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                    BeginAnimation(KnobProperty, animation);
+                }
+                else
+                {
+                    BeginAnimation(KnobProperty, null);
+                    Knob = target;
+                }
                 InvalidateVisual();
             }
         }
@@ -57,7 +80,8 @@ namespace TimeTrack
             dc.DrawRoundedRectangle(track, null, new Rect(0, 0, w, h), h / 2, h / 2);
 
             double diameter = h - 6;
-            double x = _isOn ? w - diameter - 3 : 3;
+            double t = Math.Max(0.0, Math.Min(1.0, Knob));
+            double x = 3 + t * (w - diameter - 6);
             dc.DrawEllipse(Brushes.White, null, new Point(x + diameter / 2, h / 2), diameter / 2, diameter / 2);
         }
     }

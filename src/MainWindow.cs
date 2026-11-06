@@ -1177,11 +1177,11 @@ namespace TimeTrack
         {
             Popup popup = new Popup();
             popup.PlacementTarget = chip;
-            popup.Placement = PlacementMode.Bottom;
+            popup.Placement = PlacementMode.Top;
             popup.StaysOpen = true;
-            popup.AllowsTransparency = false;
+            popup.AllowsTransparency = true;
             popup.PopupAnimation = PopupAnimation.None;
-            popup.VerticalOffset = 5;
+            popup.VerticalOffset = -5;
 
             Border panel = new Border();
             panel.Width = 236;
@@ -1190,14 +1190,31 @@ namespace TimeTrack
             panel.BorderThickness = new Thickness(1);
             panel.CornerRadius = new CornerRadius(12);
             panel.Padding = new Thickness(7);
+            panel.SnapsToDevicePixels = true;
+            panel.UseLayoutRounding = true;
             StackPanel content = new StackPanel();
             panel.Child = content;
             popup.Child = panel;
+
+            ScaleTransform expand = new ScaleTransform(0.96, 0.88);
+            panel.RenderTransform = expand;
+            panel.RenderTransformOrigin = new Point(0.5, 1.0);
+            panel.Opacity = 0;
             popup.Opened += delegate
             {
                 PresentationSource source = PresentationSource.FromVisual(panel);
                 HwndSource host = source as HwndSource;
                 if (host != null) WindowFx.MakeTopmost(host.Handle);
+
+                DoubleAnimation fade = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(150));
+                fade.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                panel.BeginAnimation(OpacityProperty, fade);
+                DoubleAnimation scaleX = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(170));
+                scaleX.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                DoubleAnimation scaleY = new DoubleAnimation(1.0, TimeSpan.FromMilliseconds(170));
+                scaleY.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
+                expand.BeginAnimation(ScaleTransform.ScaleXProperty, scaleX);
+                expand.BeginAnimation(ScaleTransform.ScaleYProperty, scaleY);
             };
             ShowCategoryList(content, panel, popup, appKey, changed);
             popup.IsOpen = true;
@@ -2095,7 +2112,8 @@ namespace TimeTrack
             }
             SegmentBar retentionBar = new SegmentBar(retentionLabels, retentionIndex);
             retentionBar.SelectionChanged += delegate { _store.SetRetentionDays(retentionValues[retentionBar.SelectedIndex]); };
-            AddSettingRow(rows, SettingRow("记录保留时长", "超过这个天数的每日记录会在自动清理时删除", retentionBar), true);
+            UIElement retentionRow = SettingRow("记录保留时长", "超过这个天数的每日记录会在自动清理时删除", retentionBar);
+            AddSettingRow(rows, retentionRow, true);
 
             int[] intervalValues = new int[] { 7, 30, 90, 180 };
             string[] intervalLabels = new string[] { "7 天", "30 天", "90 天", "180 天" };
@@ -2112,14 +2130,24 @@ namespace TimeTrack
             }
             SegmentBar intervalBar = new SegmentBar(intervalLabels, intervalIndex);
             intervalBar.SelectionChanged += delegate { _store.SetCleanupIntervalDays(intervalValues[intervalBar.SelectedIndex]); };
-            AddSettingRow(rows, SettingRow("清理检查频率", "启动时最多按这个间隔检查一次，不会频繁删除", intervalBar), false);
-            retentionBar.IsEnabled = cleanupSwitch.IsOn;
-            intervalBar.IsEnabled = cleanupSwitch.IsOn;
+            UIElement intervalRow = SettingRow("清理检查频率", "启动时最多按这个间隔检查一次，不会频繁删除", intervalBar);
+            AddSettingRow(rows, intervalRow, false);
+
+            Action updateCleanupState = delegate
+            {
+                bool on = cleanupSwitch.IsOn;
+                retentionRow.IsEnabled = on;
+                intervalRow.IsEnabled = on;
+                retentionRow.Opacity = on ? 1.0 : 0.42;
+                intervalRow.Opacity = on ? 1.0 : 0.42;
+                retentionBar.IsEnabled = on;
+                intervalBar.IsEnabled = on;
+            };
+            updateCleanupState();
             cleanupSwitch.Toggled += delegate
             {
                 _store.SetAutoCleanup(cleanupSwitch.IsOn);
-                retentionBar.IsEnabled = cleanupSwitch.IsOn;
-                intervalBar.IsEnabled = cleanupSwitch.IsOn;
+                updateCleanupState();
             };
 
             Grid tools = new Grid();
