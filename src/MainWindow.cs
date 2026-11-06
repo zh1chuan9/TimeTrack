@@ -1096,6 +1096,7 @@ namespace TimeTrack
                     nameRow.Children.Add(CategoryTag(category, app.Seconds));
                     mid.Children.Add(nameRow);
                     UsageBar bar = new UsageBar();
+                    bar.Fill = CategoryBrush(category);
                     bar.Ratio = data.Apps[0].Seconds > 0 ? (double)app.Seconds / data.Apps[0].Seconds : 0;
                     mid.Children.Add(bar);
                     Grid.SetColumn(mid, 1);

@@ -105,7 +105,7 @@ namespace TimeTrack
         public bool AutoCleanup { get; set; }
         public int RetentionDays { get; set; }
         public int CleanupIntervalDays { get; set; }
-        public DateTime LastCleanupUtc { get; set; }
+        public long LastCleanupUnixSeconds { get; set; }
 
         public Settings()
         {
@@ -124,7 +124,7 @@ namespace TimeTrack
             AutoCleanup = false;
             RetentionDays = 90;
             CleanupIntervalDays = 30;
-            LastCleanupUtc = DateTime.MinValue;
+            LastCleanupUnixSeconds = 0;
         }
     }
 
@@ -158,8 +158,8 @@ namespace TimeTrack
             if (string.Equals(category, "娱乐", StringComparison.Ordinal)) return "#F59E0B";
             if (string.Equals(category, "社交", StringComparison.Ordinal)) return "#EC4899";
             if (string.Equals(category, "工具", StringComparison.Ordinal)) return "#06B6D4";
-            if (string.Equals(category, "其他", StringComparison.Ordinal)) return "#64748B";
-            return "#64748B";
+            if (string.Equals(category, "其他", StringComparison.Ordinal)) return "#8B5CF6";
+            return "#8B5CF6";
         }
 
         public static string NormalizeColor(string value)

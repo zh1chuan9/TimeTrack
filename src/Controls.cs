@@ -89,15 +89,27 @@ namespace TimeTrack
     public class UsageBar : FrameworkElement
     {
         private double _ratio;
+        private Brush _fill;
         private readonly EventHandler _themeHandler;
 
         public UsageBar()
         {
             Height = 4;
             Margin = new Thickness(0, 6, 0, 0);
+            _fill = Ui.Accent;
             _themeHandler = delegate { InvalidateVisual(); };
             Ui.ThemeChanged += _themeHandler;
             Unloaded += delegate { Ui.ThemeChanged -= _themeHandler; };
+        }
+
+        public Brush Fill
+        {
+            get { return _fill; }
+            set
+            {
+                _fill = value ?? Ui.Accent;
+                InvalidateVisual();
+            }
         }
 
         public double Ratio
@@ -119,7 +131,7 @@ namespace TimeTrack
             dc.DrawRoundedRectangle(Ui.Track, null, new Rect(0, 0, w, h), h / 2, h / 2);
             if (_ratio <= 0) return;
             double fill = Math.Max(3, w * _ratio);
-            dc.DrawRoundedRectangle(Ui.Accent, null, new Rect(0, 0, fill, h), h / 2, h / 2);
+            dc.DrawRoundedRectangle(_fill ?? Ui.Accent, null, new Rect(0, 0, fill, h), h / 2, h / 2);
         }
     }
 

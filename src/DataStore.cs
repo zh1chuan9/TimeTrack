@@ -381,6 +381,7 @@ namespace TimeTrack
             _settings.CategoryColors = categoryColors;
 
             if (_settings.RetentionDays < 7) _settings.RetentionDays = 90;
+            if (_settings.LastCleanupUnixSeconds < 0) _settings.LastCleanupUnixSeconds = 0;
             if (_settings.CleanupIntervalDays < 1) _settings.CleanupIntervalDays = 30;
 
             _excluded.Clear();
@@ -1006,8 +1007,8 @@ namespace TimeTrack
             {
                 if (_disposed || !_settings.AutoCleanup) return 0;
                 DateTime now = DateTime.UtcNow;
-                if (!force && _settings.LastCleanupUtc != DateTime.MinValue &&
-                    (now - _settings.LastCleanupUtc).TotalDays < _settings.CleanupIntervalDays)
+                if (!force && _settings.LastCleanupUnixSeconds > 0 &&
+                    (now - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(_settings.LastCleanupUnixSeconds)).TotalDays < _settings.CleanupIntervalDays)
                     return 0;
 
                 int removed = 0;
@@ -1034,7 +1035,7 @@ namespace TimeTrack
                             }
                         }
                     }
-                    _settings.LastCleanupUtc = now;
+                    _settings.LastCleanupUnixSeconds = (long)(now - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
                     SaveSettingsLocked();
                     Interlocked.Increment(ref _version);
                     Logger.Write("Auto cleanup removed " + removed + " day file(s), retention " + _settings.RetentionDays + " days.");
