@@ -248,11 +248,19 @@ namespace TimeTrack
         }
     }
 
+    public class ChartSegment
+    {
+        public string Category;
+        public long Seconds;
+        public string Color;
+    }
+
     public class ChartItem
     {
         public string Label;
         public long Seconds;
         public string Tip;
         public bool Highlight;
+        public List<ChartSegment> Segments;
     }
 }

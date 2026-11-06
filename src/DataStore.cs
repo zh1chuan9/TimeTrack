@@ -205,6 +205,57 @@ namespace TimeTrack
             return CategoryCatalog.DefaultColor(name);
         }
 
+        public List<Dictionary<string, long>> BuildCategoryBuckets(DateTime start, DateTime end, bool hourly)
+        {
+            List<Dictionary<string, long>> buckets = new List<Dictionary<string, long>>();
+            if (end.Date < start.Date) return buckets;
+            if (hourly)
+            {
+                for (int i = 0; i < 24; i++) buckets.Add(new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase));
+            }
+            else
+            {
+                int days = (end.Date - start.Date).Days + 1;
+                for (int i = 0; i < days; i++) buckets.Add(new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase));
+            }
+
+            lock (_gate)
+            {
+                for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
+                {
+                    DayData day = GetDayLocked(date);
+                    int dayIndex = (date - start.Date).Days;
+                    foreach (AppUsage usage in day.Apps.Values)
+                    {
+                        if (usage == null || string.IsNullOrEmpty(usage.Key)) continue;
+                        if (_excluded.Contains(usage.Key)) continue;
+                        string category = ResolveCategoryLocked(usage.Key);
+                        long[] hours = NormalizeHours(usage.Hours);
+                        for (int h = 0; h < 24; h++)
+                        {
+                            long seconds = hours[h];
+                            if (seconds <= 0) continue;
+                            int index = hourly ? h : dayIndex;
+                            if (index < 0 || index >= buckets.Count) continue;
+                            Dictionary<string, long> bucket = buckets[index];
+                            long existing;
+                            bucket.TryGetValue(category, out existing);
+                            bucket[category] = existing + seconds;
+                        }
+                    }
+                }
+            }
+            return buckets;
+        }
+
+        private string ResolveCategoryLocked(string key)
+        {
+            string category;
+            if (_settings.Categories != null && _settings.Categories.TryGetValue(key, out category))
+                return CategoryCatalog.Normalize(category);
+            return CategoryCatalog.Normalize(null);
+        }
+
         public bool AddCategory(string name, string color)
         {
             if (string.IsNullOrWhiteSpace(name)) return false;

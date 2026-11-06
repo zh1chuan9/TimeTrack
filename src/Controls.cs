@@ -218,6 +218,7 @@ namespace TimeTrack
         private readonly Typeface _typeface;
         private readonly Typeface _typefaceBold;
         private readonly EventHandler _themeHandler;
+        private readonly Dictionary<string, Brush> _chartBrushes = new Dictionary<string, Brush>(StringComparer.OrdinalIgnoreCase);
         private static readonly Brush TipBg = Ui.TipBg;
         private static readonly Brush TipShadow = Ui.BrushFrom("#4D000000");
         private static readonly Pen TipBorder = new Pen(Ui.StrokeSoft, 1);
@@ -357,8 +358,28 @@ namespace TimeTrack
                     if (barHeight < 2) barHeight = 2;
                     double x = left + i * slot + (slot - barWidth) / 2;
                     double y = baseY - barHeight;
-                    Brush fill = item.Highlight ? Ui.AccentLight : Ui.Accent;
-                    dc.DrawRoundedRectangle(fill, null, new Rect(x, y, barWidth, barHeight), 3, 3);
+                    Rect barRect = new Rect(x, y, barWidth, barHeight);
+                    if (item.Segments != null && item.Segments.Count > 0)
+                    {
+                        dc.PushClip(new RectangleGeometry(barRect, 3, 3));
+                        double segmentBottom = baseY;
+                        foreach (ChartSegment segment in item.Segments)
+                        {
+                            if (segment.Seconds <= 0) continue;
+                            double segmentHeight = barHeight * (double)segment.Seconds / item.Seconds;
+                            dc.DrawRectangle(ChartBrush(segment.Color), null,
+                                new Rect(x, segmentBottom - segmentHeight, barWidth, segmentHeight + 0.4));
+                            segmentBottom -= segmentHeight;
+                        }
+                        dc.Pop();
+                        if (item.Highlight)
+                            dc.DrawRoundedRectangle(Ui.HoverOverlay, null, barRect, 3, 3);
+                    }
+                    else
+                    {
+                        Brush fill = item.Highlight ? Ui.AccentLight : Ui.Accent;
+                        dc.DrawRoundedRectangle(fill, null, barRect, 3, 3);
+                    }
                 }
 
                 if (_hover >= 0 && _hover < count)
@@ -425,8 +446,35 @@ namespace TimeTrack
 
             FormattedText titleText = Format(title, 11.5, Ui.Muted, false);
             FormattedText valueText = Format(value, 13.5, Ui.Text, true);
+            List<ChartSegment> rows = new List<ChartSegment>();
+            if (item.Segments != null && item.Segments.Count > 0)
+            {
+                int visible = Math.Min(5, item.Segments.Count);
+                for (int i = 0; i < visible; i++) rows.Add(item.Segments[i]);
+                if (item.Segments.Count > visible)
+                {
+                    long rest = 0;
+                    for (int i = visible; i < item.Segments.Count; i++) rest += item.Segments[i].Seconds;
+                    if (rest > 0)
+                    {
+                        ChartSegment more = new ChartSegment();
+                        more.Category = "其余 " + (item.Segments.Count - visible) + " 类";
+                        more.Seconds = rest;
+                        more.Color = "#64748B";
+                        rows.Add(more);
+                    }
+                }
+            }
+
             double cardWidth = Math.Max(152, Math.Max(titleText.Width, valueText.Width) + 28);
-            double cardHeight = 58;
+            foreach (ChartSegment row in rows)
+            {
+                FormattedText category = Format(row.Category, 10.5, Ui.TextSoft, false);
+                FormattedText duration = Format(Ui.Duration(row.Seconds), 10.5, Ui.Muted, true);
+                cardWidth = Math.Max(cardWidth, category.Width + duration.Width + 58);
+            }
+            if (cardWidth > 262) cardWidth = 262;
+            double cardHeight = 58 + rows.Count * 19;
             double x;
             double y;
             if (barY - cardHeight - 10 >= top + 2)
@@ -450,6 +498,33 @@ namespace TimeTrack
             dc.DrawRoundedRectangle(Ui.Accent, null, new Rect(x + 11, y + 11, 3, cardHeight - 22), 1.5, 1.5);
             dc.DrawText(titleText, new Point(x + 22, y + 9));
             dc.DrawText(valueText, new Point(x + 22, y + 28));
+            if (rows.Count > 0)
+            {
+                Pen separatorPen = new Pen(Ui.StrokeSoft, 1);
+                dc.DrawLine(separatorPen, new Point(x + 12, y + 51), new Point(x + cardWidth - 12, y + 51));
+                double rowY = y + 59;
+                foreach (ChartSegment row in rows)
+                {
+                    dc.DrawEllipse(ChartBrush(row.Color), null, new Point(x + 18, rowY + 5.5), 3.5, 3.5);
+                    FormattedText category = Format(row.Category, 10.5, Ui.TextSoft, false);
+                    FormattedText duration = Format(Ui.Duration(row.Seconds), 10.5, Ui.Muted, true);
+                    dc.DrawText(category, new Point(x + 27, rowY - 1));
+                    dc.DrawText(duration, new Point(x + cardWidth - 14 - duration.Width, rowY - 1));
+                    rowY += 19;
+                }
+            }
+        }
+
+        private Brush ChartBrush(string color)
+        {
+            if (string.IsNullOrEmpty(color)) return Ui.Accent;
+            Brush brush;
+            if (!_chartBrushes.TryGetValue(color, out brush))
+            {
+                brush = Ui.BrushFrom(color);
+                _chartBrushes[color] = brush;
+            }
+            return brush;
         }
 
         private FormattedText Format(string text, double size, Brush brush, bool bold)

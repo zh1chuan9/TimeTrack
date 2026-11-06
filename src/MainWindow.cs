@@ -890,6 +890,12 @@ namespace TimeTrack
             hourly = _rangeMode == 0;
             average = 0;
             DateTime today = DateTime.Today;
+            DateTime last = hourly
+                ? data.Start.Date
+                : (_rangeMode == 2
+                    ? new DateTime(data.Start.Year, data.Start.Month, 1).AddMonths(1).AddDays(-1)
+                    : data.Start.Date.AddDays(6));
+            List<Dictionary<string, long>> buckets = _store.BuildCategoryBuckets(data.Start.Date, last, hourly);
 
             if (hourly)
             {
@@ -901,14 +907,12 @@ namespace TimeTrack
                     item.Seconds = data.HourBins[hour];
                     item.Tip = hour.ToString("00", CultureInfo.InvariantCulture) + ":00 - " + hour.ToString("00", CultureInfo.InvariantCulture) + ":59  ·  " + Ui.Duration(item.Seconds);
                     item.Highlight = date == today && hour == DateTime.Now.Hour;
+                    item.Segments = BuildChartSegments(hour < buckets.Count ? buckets[hour] : null, item.Seconds);
                     items.Add(item);
                 }
             }
             else
             {
-                DateTime last = _rangeMode == 2
-                    ? new DateTime(data.Start.Year, data.Start.Month, 1).AddMonths(1).AddDays(-1)
-                    : data.Start.Date.AddDays(6);
                 Dictionary<DateTime, long> byDate = new Dictionary<DateTime, long>();
                 foreach (DayBar bar in data.Days) byDate[bar.Date.Date] = bar.Seconds;
 
@@ -922,11 +926,58 @@ namespace TimeTrack
                     item.Tip = date.ToString("M月d日", CultureInfo.InvariantCulture) + " " + Ui.WeekdayLong(date) +
                         "  ·  " + (seconds > 0 ? Ui.Duration(seconds) : "暂无记录");
                     item.Highlight = date == today;
+                    int dayIndex = (date - data.Start.Date).Days;
+                    item.Segments = BuildChartSegments(dayIndex >= 0 && dayIndex < buckets.Count ? buckets[dayIndex] : null, item.Seconds);
                     items.Add(item);
                 }
                 average = data.Average;
             }
             return items;
+        }
+
+        private List<ChartSegment> BuildChartSegments(Dictionary<string, long> weights, long total)
+        {
+            List<ChartSegment> result = new List<ChartSegment>();
+            if (weights == null || total <= 0) return result;
+            long sum = 0;
+            List<KeyValuePair<string, long>> ordered = new List<KeyValuePair<string, long>>();
+            foreach (KeyValuePair<string, long> entry in weights)
+            {
+                if (entry.Value <= 0) continue;
+                sum += entry.Value;
+                ordered.Add(entry);
+            }
+            if (sum <= 0) return result;
+            ordered.Sort(delegate(KeyValuePair<string, long> a, KeyValuePair<string, long> b)
+            {
+                int compare = b.Value.CompareTo(a.Value);
+                if (compare != 0) return compare;
+                return string.Compare(a.Key, b.Key, StringComparison.CurrentCulture);
+            });
+
+            long remaining = total;
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                long part;
+                if (i == ordered.Count - 1)
+                {
+                    part = remaining;
+                }
+                else
+                {
+                    part = (long)Math.Floor((double)total * ordered[i].Value / sum + 0.5);
+                    if (part > remaining) part = remaining;
+                }
+                if (part <= 0) continue;
+                ChartSegment segment = new ChartSegment();
+                segment.Category = ordered[i].Key;
+                segment.Seconds = part;
+                segment.Color = _store.GetCategoryColor(ordered[i].Key);
+                result.Add(segment);
+                remaining -= part;
+                if (remaining <= 0) break;
+            }
+            return result;
         }
 
         private static int PeakHour(long[] bins)
@@ -1096,7 +1147,6 @@ namespace TimeTrack
                     nameRow.Children.Add(CategoryTag(category, app.Seconds));
                     mid.Children.Add(nameRow);
                     UsageBar bar = new UsageBar();
-                    bar.Fill = CategoryBrush(category);
                     bar.Ratio = data.Apps[0].Seconds > 0 ? (double)app.Seconds / data.Apps[0].Seconds : 0;
                     mid.Children.Add(bar);
                     Grid.SetColumn(mid, 1);
